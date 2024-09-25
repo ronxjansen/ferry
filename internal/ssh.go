@@ -1,4 +1,4 @@
-package main
+package ferry
 
 import (
 	"fmt"
@@ -40,13 +40,8 @@ func NewSSHClient(server Server) (*ssh.Client, error) {
 		authMethod = append(authMethod, ssh.PublicKeysCallback(agentClient.Signers))
 	}
 
-	port := server.Port
-	if port == 0 {
-		port = 22
-	}
-
 	// Connect to the server
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", server.Host, port), &ssh.ClientConfig{
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", server.Host, server.Port), &ssh.ClientConfig{
 		User:            server.User,
 		Auth:            authMethod,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // You should replace this with a proper host key callback
@@ -56,7 +51,7 @@ func NewSSHClient(server Server) (*ssh.Client, error) {
 		return nil, err
 	}
 
-	logger.Info("SSH client created", zap.String("host", server.Host), zap.Int("port", port), zap.String("user", server.User))
+	logger.Info("SSH client created", zap.String("host", server.Host), zap.Int("port", server.Port), zap.String("user", server.User))
 
 	return client, nil
 }

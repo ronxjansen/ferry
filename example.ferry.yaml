@@ -5,6 +5,13 @@ docker_file: ./Dockerfile # Defaults to Dockerfile ./Dockerfile
 docker_context: ./ # Defaults to current directory .
 port: 8080 # Container port, defaults to 3000
 
+registry:
+  username: ronxjansen
+  password: 
+  server: ghcr.io 
+
+
+
 health_check:
   path: /health
   success_status_code: 200

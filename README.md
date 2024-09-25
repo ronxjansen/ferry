@@ -1,6 +1,6 @@
 # Ferry
 
-Ferry is a command-line tool for deploying Docker based applications to one or more remote VPS over SSH. It provides a simple way to manage deployments, environment variables, logs, and rollbacks across multiple servers.
+Your own Fly.io. Ferry allows you to deploy Docker based apps to your own VPS. It provides a simple way to manage deployments, environment variables, logs, databases, rollbacks and more across multiple servers. And the beauty of it costs you nothing on top of your existing VPS hosting.
 
 <div align="center">
   <img src="./assets/gopher.png" alt="Golang gopher on a Ferry" width="300">
@@ -62,12 +62,18 @@ Contributions are welcome! Please open an issue or submit a PR.
 
 ## Roadmap
 
+- [ ] Pull image from registry
+- [ ] Local build and deploy
+- [ ] Deploy databases (using docker or docker compose)
+- [ ] Support multiple servers
+- [ ] Hooks
+- [ ] Docker compose support
 - [ ] Migrations
-- [ ] Rolling update
+- [ ] Rolling restarts
 - [ ] Rollback
 - [ ] Better zero downtime deployment (we now only rely on Traefik)
 - [ ] Add support for more Linux distros
-- [ ] Support multiple servers
+- [ ] Asset bridging
 
 ## Out of scope
 
