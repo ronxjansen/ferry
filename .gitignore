@@ -1,3 +1,4 @@
-config.yaml
+ferry.yaml
 .env
 .env.enc
+ferry
