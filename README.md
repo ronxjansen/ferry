@@ -66,6 +66,7 @@ Contributions are welcome! Please open an issue or submit a PR.
 - [ ] Local build and deploy
 - [ ] Deploy databases (using docker or docker compose)
 - [ ] Support multiple servers
+- [ ] Generate a preview of the changes before applying them
 - [ ] Hooks
 - [ ] Docker compose support
 - [ ] Migrations

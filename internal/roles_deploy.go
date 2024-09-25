@@ -8,30 +8,28 @@ type Role interface {
 	BuildTasks(cfg Config, server Server) []Task
 }
 
+func cmdf(cmd string, args ...any) string {
+	return fmt.Sprintf(cmd, args...)
+}
+
 type DeployTraefikServiceRole struct{}
 
 func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task {
+	cmd := cmdf(`docker run -d --name %s`, cfg.ContainerName)
+	cmd += cmdf(`--network traefik-network`)
+	cmd += cmdf(`--env-file %s`, cfg.EnvFile)
+	cmd += cmdf(`--label "traefik.enable=true"`)
+	cmd += cmdf(`--label "traefik.http.routers.%s.rule=Host('%s')"`, cfg.ContainerName, cfg.Domain)
+	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, cfg.ContainerName, cfg.Port)
+	cmd += cmdf(`--label "traefik.http.routers.%s.service=%s"`, cfg.ContainerName, cfg.ContainerName)
+	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, cfg.ContainerName, cfg.Port)
+	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.path=%s"`, cfg.ContainerName, cfg.HealthCheck.Path)
+	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.interval=%s"`, cfg.ContainerName, cfg.HealthCheck.Interval)
+	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.timeout=%s"`, cfg.ContainerName, cfg.HealthCheck.Timeout)
+	cmd += cmdf(`%s`, cfg.Image)
+
 	return []Task{
-		NewTask(fmt.Sprintf(`docker run -d \
-			--name %s \
-			--network traefik-network \
-			--env-file %s \
-			--label "traefik.enable=true" \
-			--label "traefik.http.routers.%s.rule=Host('%s')" \
-			--label "traefik.http.services.%s.loadbalancer.server.port=%d"`,
-			cfg.ContainerName, cfg.EnvFile, cfg.ContainerName, cfg.Domain, cfg.ContainerName, cfg.Port) +
-			fmt.Sprintf(
-				` \
-			--label "traefik.http.routers.%s.service=%s" \
-			--label "traefik.http.services.%s.loadbalancer.server.port=%d"`,
-				cfg.ContainerName, cfg.ContainerName, cfg.ContainerName, cfg.Port) +
-			fmt.Sprintf(
-				` \
-			--label "traefik.http.services.%s.loadbalancer.healthcheck.path=%s" \
-			--label "traefik.http.services.%s.loadbalancer.healthcheck.interval=%s" \
-			--label "traefik.http.services.%s.loadbalancer.healthcheck.timeout=%s" \
-			%s`,
-				cfg.ContainerName, cfg.HealthCheck.Path, cfg.ContainerName, cfg.HealthCheck.Interval, cfg.ContainerName, cfg.HealthCheck.Timeout, cfg.Image)),
+		NewTask(cmd).ThrowDockerErrors(),
 	}
 }
 
@@ -39,9 +37,9 @@ type UpdateEnvVarsRole struct{}
 
 func (s *UpdateEnvVarsRole) BuildTasks(cfg Config, server Server) []Task {
 	return []Task{
-		NewTask(fmt.Sprintf("scp %s %s@%s:%d", cfg.EnvFile, server.User, server.Host, server.Port)),
-		NewTask(fmt.Sprintf("sops --encrypt --in-place --age1 --age-recipient %s %s", cfg.CertResolver, cfg.EnvFile)),
-		NewTask(fmt.Sprintf("scp %s %s@%s:%d/%s", cfg.EnvFile, server.User, server.Host, server.Port, server.AppDir)),
+		NewTask(cmdf("scp %s %s@%s:%d", cfg.EnvFile, server.User, server.Host, server.Port)),
+		NewTask(cmdf("sops --encrypt --in-place --age1 --age-recipient %s %s", cfg.CertResolver, cfg.EnvFile)),
+		NewTask(cmdf("scp %s %s@%s:%d/%s", cfg.EnvFile, server.User, server.Host, server.Port, server.AppDir)),
 	}
 }
 
@@ -49,8 +47,8 @@ type StopTraefikServiceRole struct{}
 
 func (s *StopTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task {
 	return []Task{
-		NewTask(fmt.Sprintf("docker stop %s", cfg.ContainerName)),
-		NewTask(fmt.Sprintf("docker rm %s", cfg.ContainerName)),
+		NewTask(cmdf("docker stop %s", cfg.ContainerName)),
+		NewTask(cmdf("docker rm %s", cfg.ContainerName)),
 	}
 }
 
@@ -58,8 +56,8 @@ type PullDockerImageRole struct{}
 
 func (s *PullDockerImageRole) BuildTasks(cfg Config, server Server) []Task {
 	return []Task{
-		NewTask(fmt.Sprintf("docker pull %s", cfg.Image)),
-		NewTask(fmt.Sprintf("docker tag %s %s", cfg.Image, cfg.ContainerName)),
+		NewTask(cmdf("docker pull %s", cfg.Image)),
+		NewTask(cmdf("docker tag %s %s", cfg.Image, cfg.ContainerName)),
 	}
 }
 
@@ -71,24 +69,10 @@ func (s *BootstrapAppDirRole) Description() string {
 
 func (s *BootstrapAppDirRole) BuildTasks(cfg Config, server Server) []Task {
 	return []Task{
-		NewTask(fmt.Sprintf("mkdir -p %s", server.AppDir)),
-		NewTask(fmt.Sprintf("mkdir -p %s/letsencrypt", server.AppDir)),
+		NewTask(cmdf("mkdir -p %s", server.AppDir)),
+		NewTask(cmdf("mkdir -p %s/letsencrypt", server.AppDir)),
 	}
 }
-
-// TODO shouldnt we do this when we deploy?
-// type SyncEnvVarsRole struct{}
-
-// func (s *SyncEnvVarsRole) Description() string {
-// 	return "Sync environment variables to the server"
-// }
-
-// func (s *SyncEnvVarsRole) BuildTasks(cfg Config, server Server) []Task {
-// 	return []Task{
-// 		NewTask(fmt.Sprintf("scp %s %s@%s:%d/%s", cfg.EnvFile, server.User, server.Host, server.Port, server.AppDir), WithRemote(false)),
-// 		NewTask("sops --encrypt --in-place --age1 --age-recipient %s %s"),
-// 	}
-// }
 
 var Deploy = []Role{
 	&BootstrapAppDirRole{},
