@@ -1,4 +1,4 @@
-module ferry
+module github.com/ronxjansen/ferry
 
 go 1.22.0
 

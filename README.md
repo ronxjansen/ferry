@@ -2,22 +2,24 @@
 
 Ferry is a command-line tool for deploying Docker based applications to one or more remote VPS over SSH. It provides a simple way to manage deployments, environment variables, logs, and rollbacks across multiple servers.
 
-<img src="./assets/gopher.png" alt="Golang gopher on a Ferry" width="500">
-
-![GitHub](https://img.shields.io/github/license/ronxjansen/ferry)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/ronxjansen/ferry)
-![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/ronxjansen/ferry)
+<div align="center">
+  <img src="./assets/gopher.png" alt="Golang gopher on a Ferry" width="300">
+  <br>
+  <img src="https://img.shields.io/github/license/ronxjansen/ferry" alt="GitHub">
+  <img src="https://img.shields.io/github/go-mod/go-version/ronxjansen/ferry" alt="GitHub go.mod Go version">
+  <img src="https://img.shields.io/github/v/tag/ronxjansen/ferry" alt="GitHub tag (latest SemVer)">
+</div>
 
 ## Features
 
-💻 Deploy any application from a Dockerfile
-✊ Zero downtime deployment
-🌏 High availability and load balancing
-🔒 Zero config SSL Certs and auto renewal
-🔑 Deploy and update environment variables with SOPS
-📄 View logs in real time
-🔄 Rollback to previous versions
-🚀 One command deployment
+- 💻 Deploy any application from a Dockerfile
+- ✊ Zero downtime deployment
+- 🌏 High availability and load balancing
+- 🔒 Zero config SSL Certs and auto renewal
+- 🔑 Deploy and update environment variables with SOPS
+- 📄 View logs in real time
+- 🔄 Rollback to previous versions
+- 🚀 One command deployment
 
 ## Commands
 
@@ -50,14 +52,13 @@ That's it!
 - SSH access to remote servers
 - a Ubuntu LTS VPS with SSH access to it
 
-
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a PR.
 
 ## Motivation
 
-Kamal and Sidekick are two major inspirations for writing this tool. Kamal is a great solution, but Ruby based. I am not in the mood to learn Ruby to be able to create custom deployments. Sidekick is the Golang based Kamal alternative, yet very early stage. I've considered to write a few PR's, but considering the scope of changes I wanted to bring, I decided a tool from scratch.
+[Kamal](https://github.com/basecamp/kamal) and [Sidekick](https://github.com/MightyMoud/sidekick) are two major inspirations for writing this tool. Kamal is a great solution, but Ruby based. I am not in the mood to learn Ruby to be able to create custom deployments. Sidekick is the Golang based Kamal alternative, yet very early stage. I've considered to write a few PR's, but considering the scope of the changes I wanted to bring, I decided to built it from scratch.
 
 ## Roadmap
 
@@ -66,6 +67,7 @@ Kamal and Sidekick are two major inspirations for writing this tool. Kamal is a 
 - [ ] Rollback
 - [ ] Better zero downtime deployment (we now only rely on Traefik)
 - [ ] Add support for more Linux distros
+- [ ] Support multiple servers
 
 ## Out of scope
 
