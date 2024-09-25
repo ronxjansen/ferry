@@ -2,6 +2,8 @@ package ferry
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
@@ -54,7 +56,17 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, task Task) (i
 
 	commandStr := task.Command
 
-	err = session.Run(commandStr)
+	if task.Remote {
+		err = session.Run(commandStr)
+	} else {
+		// Run the command locally with SSH agent forwarding
+		cmd := exec.Command("sh", "-c", commandStr)
+		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+os.Getenv("SSH_AUTH_SOCK"))
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err = cmd.Run()
+	}
+
 	output := stdout.Bytes()
 	if len(stderr.Bytes()) > 0 {
 		output = append(output, '\n')

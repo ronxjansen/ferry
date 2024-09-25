@@ -89,9 +89,9 @@ func buildConfig() ferry.Config {
 
 func Execute() {
 	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "./ferry.yaml", "Path to your ferry.yaml config file")
-	rootCmd.PersistentFlags().StringVarP(&dockerFilePath, "docker-file", "f", "./Dockerfile", "Path to your Dockerfile")
-	rootCmd.PersistentFlags().StringVarP(&dockerContext, "docker-context", "x", "./", "Path to the context of your Dockerfile")
-	rootCmd.PersistentFlags().StringVarP(&envFilePath, "env-file", "e", "./.env.production", "Path to your environment variables file")
+	rootCmd.PersistentFlags().StringVarP(&dockerFilePath, "docker-file", "f", "", "Path to your Dockerfile")
+	rootCmd.PersistentFlags().StringVarP(&dockerContext, "docker-context", "x", "", "Path to the context of your Dockerfile")
+	rootCmd.PersistentFlags().StringVarP(&envFilePath, "env-file", "e", "", "Path to your environment variables file")
 	rootCmd.PersistentFlags().StringVarP(&imageName, "image", "i", "", "Docker image to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&certResolver, "cert-resolver", "r", "", "Cert resolver to use for your application")

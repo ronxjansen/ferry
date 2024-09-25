@@ -44,7 +44,7 @@ func NewSSHClient(server Server) (*ssh.Client, error) {
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", server.Host, server.Port), &ssh.ClientConfig{
 		User:            server.User,
 		Auth:            authMethod,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // You should replace this with a proper host key callback
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	})
 	if err != nil {
 		logger.Error("Error connecting to server", zap.Error(err))

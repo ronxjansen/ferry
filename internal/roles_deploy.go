@@ -9,13 +9,13 @@ type Role interface {
 }
 
 func cmdf(cmd string, args ...any) string {
-	return fmt.Sprintf(cmd, args...)
+	return fmt.Sprintf(cmd+" ", args...)
 }
 
 type DeployTraefikServiceRole struct{}
 
 func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task {
-	cmd := cmdf(`docker run -d --name %s`, cfg.ContainerName)
+	cmd := cmdf(`docker run -d --name %s-$SHORT_ID`, cfg.ContainerName)
 	cmd += cmdf(`--network traefik-network`)
 	cmd += cmdf(`--env-file %s`, cfg.EnvFile)
 	cmd += cmdf(`--label "traefik.enable=true"`)
@@ -28,18 +28,18 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task 
 	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.timeout=%s"`, cfg.ContainerName, cfg.HealthCheck.Timeout)
 	cmd += cmdf(`%s`, cfg.Image)
 
-	return []Task{
-		NewTask(cmd).ThrowDockerErrors(),
-	}
+	updateEnvVars := &UpdateEnvVarsRole{}
+	updateEnvVarsTasks := updateEnvVars.BuildTasks(cfg, server)
+
+	return append(updateEnvVarsTasks, NewTask(cmd).ThrowDockerErrors())
 }
 
 type UpdateEnvVarsRole struct{}
 
 func (s *UpdateEnvVarsRole) BuildTasks(cfg Config, server Server) []Task {
 	return []Task{
-		NewTask(cmdf("scp %s %s@%s:%d", cfg.EnvFile, server.User, server.Host, server.Port)),
+		NewTask(cmdf("scp -A %s %s@%s:%s", cfg.EnvFile, server.User, server.Host, server.AppDir)).SetRemote(false),
 		NewTask(cmdf("sops --encrypt --in-place --age1 --age-recipient %s %s", cfg.CertResolver, cfg.EnvFile)),
-		NewTask(cmdf("scp %s %s@%s:%d/%s", cfg.EnvFile, server.User, server.Host, server.Port, server.AppDir)),
 	}
 }
 
