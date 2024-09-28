@@ -24,13 +24,13 @@ type Config struct {
 	EnvFile       string      `yaml:"env_file" default:"./.env"`
 	DockerFile    string      `yaml:"docker_file" default:"./Dockerfile"`
 	DockerContext string      `yaml:"docker_context" default:"./"`
-	Port          int         `yaml:"port"`
+	Port          int         `yaml:"port" default:"3000"`
 }
 
 type Server struct {
 	Host    string   `yaml:"host"`
 	User    string   `yaml:"user" default:"root"`
-	Port    int      `yaml:"port"`
+	Port    int      `yaml:"port" default:"22"`
 	KeyFile string   `yaml:"key_file"`
 	AppDir  string   `yaml:"app_dir"`
 	Volumes []string `yaml:"volumes"`

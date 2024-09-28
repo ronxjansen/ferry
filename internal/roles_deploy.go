@@ -3,6 +3,7 @@ package ferry
 import (
 	"context"
 	"fmt"
+	"strconv"
 )
 
 type Role interface {
@@ -33,6 +34,11 @@ type DeployTraefikServiceRole struct{}
 func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	appName := ctx.Value(CtxKey("app_name")).(string)
 	oldName := ctx.Value(CtxKey("old_name")).(string)
+	port := ctx.Value(CtxKey("port")).(string)
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		panic(err)
+	}
 
 	// to be safe stop the app_name container if it is running
 	cmd := cmdf(`docker run -d --name %s`, appName)
@@ -41,7 +47,7 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 	for _, volume := range server.Volumes {
 		cmd += cmdf(`--volume %s`, volume)
 	}
-	cmd += cmdf(`--publish $port:%d`, cfg.Port)
+	cmd += cmdf(`--publish %d:%d`, portInt, cfg.Port)
 	cmd += cmdf(`--label "traefik.enable=true"`)
 	cmd += cmdf(`--label "traefik.http.routers.%s.rule=Host('%s')"`, appName, cfg.Domain)
 	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, appName, cfg.Port)
