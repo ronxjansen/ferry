@@ -28,11 +28,17 @@ type Config struct {
 }
 
 type Server struct {
-	Host    string `yaml:"host"`
-	User    string `yaml:"user" default:"root"`
-	Port    int    `yaml:"port"`
-	KeyFile string `yaml:"key_file"`
-	AppDir  string `yaml:"app_dir"`
+	Host    string   `yaml:"host"`
+	User    string   `yaml:"user" default:"root"`
+	Port    int      `yaml:"port"`
+	KeyFile string   `yaml:"key_file"`
+	AppDir  string   `yaml:"app_dir"`
+	Volumes []string `yaml:"volumes"`
+}
+
+type Volume struct {
+	HostPath      string `yaml:"host_path"`
+	ContainerPath string `yaml:"container_path"`
 }
 
 var Logger = prettyconsole.NewLogger(zap.DebugLevel)

@@ -62,9 +62,9 @@ Contributions are welcome! Please open an issue or submit a PR.
 
 ## Roadmap
 
-- [ ] Pull image from registry
-- [ ] Local build and deploy
 - [ ] Deploy databases (using docker or docker compose)
+- [ ] Add SOPS
+- [ ] Local build and deploy
 - [ ] Support multiple servers
 - [ ] Generate a preview of the changes before applying them
 - [ ] Hooks
@@ -75,6 +75,7 @@ Contributions are welcome! Please open an issue or submit a PR.
 - [ ] Better zero downtime deployment (we now only rely on Traefik)
 - [ ] Add support for more Linux distros
 - [ ] Asset bridging
+- [ ] Minimal dashboard + metrics in a terminal UI (traffic, CPU, memory, etc.)
 
 ## Out of scope
 

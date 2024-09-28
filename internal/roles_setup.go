@@ -1,6 +1,9 @@
 package ferry
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 var Setup = []Role{
 	// &InstallDockerRole{},
@@ -10,7 +13,7 @@ var Setup = []Role{
 
 type InstallDockerRole struct{}
 
-func (s *InstallDockerRole) BuildTasks(cfg Config, server Server) []Task {
+func (s *InstallDockerRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask("docker --version").SkipByOnError(7),
 		NewTask("sudo apt-get update"),
@@ -25,7 +28,7 @@ func (s *InstallDockerRole) BuildTasks(cfg Config, server Server) []Task {
 
 type InstallSopsRole struct{}
 
-func (s *InstallSopsRole) BuildTasks(cfg Config, server Server) []Task {
+func (s *InstallSopsRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask("sudo apt-get update"),
 		NewTask("curl -LO https://github.com/getsops/sops/releases/download/v3.9.0/sops-v3.9.0.linux.amd64"),
@@ -41,7 +44,7 @@ func (s *InitTraefikServiceRole) Description() string {
 	return "Initialize the traefik service on the server"
 }
 
-func (s *InitTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task {
+func (s *InitTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask("docker network create traefik-network").IgnoreError(),
 		NewTask(`if docker ps --filter name="traefik" --format '{{.Names}}'; then
@@ -65,4 +68,14 @@ func (s *InitTraefikServiceRole) BuildTasks(cfg Config, server Server) []Task {
 		--certificatesresolvers.myresolver.acme.email=%s \
 		`, cfg.CertResolver)),
 	}
+}
+
+type InitFerryConfigRole struct{}
+
+func (s *InitFerryConfigRole) Description() string {
+	return "Initialize the ferry config on the server"
+}
+
+func (s *InitFerryConfigRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	return []Task{}
 }

@@ -2,6 +2,7 @@ package ferry
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 
@@ -26,15 +27,19 @@ func (c *CommandManager) Run(roles []Role) error {
 			logger.Fatal("Failed to create SSH client", zap.Error(err), zap.String("server", server.Host))
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		for i := 0; i < len(roles); i++ {
 			role := roles[i]
-			tasks := role.BuildTasks(c.config, server)
+			tasks := role.BuildTasks(c.config, ctx, server)
 
 			for in := 0; in < len(tasks); in++ {
-				nextIndex, err := c.runCmd(client, server, tasks[in])
+				newCtx, nextIndex, err := c.runCmd(client, server, ctx, tasks[in])
 				if err != nil {
 					return err
 				}
+				ctx = newCtx
 				in += nextIndex
 			}
 		}
@@ -43,7 +48,8 @@ func (c *CommandManager) Run(roles []Role) error {
 	return nil
 }
 
-func (c *CommandManager) runCmd(client *ssh.Client, server Server, task Task) (int, error) {
+func (c *CommandManager) runCmd(client *ssh.Client, server Server, ctx context.Context, task Task) (context.Context, int, error) {
+	// we can only run one command in a session; if we want to run multiple commands in a session we need to combine commands into a single string seperated by ;. This impacts error handling, output handling and skipping logic.
 	session, err := client.NewSession()
 	if err != nil {
 		logger.Fatal("error creating SSH session: %v", zap.Error(err), zap.String("server", server.Host))
@@ -57,6 +63,9 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, task Task) (i
 	commandStr := task.Command
 
 	if task.Remote {
+		if task.PipeStdout {
+			session.Stdout = os.Stdout
+		}
 		err = session.Run(commandStr)
 	} else {
 		// Run the command locally with SSH agent forwarding
@@ -74,10 +83,10 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, task Task) (i
 	}
 
 	// Each tasks can determine how to handle the error
-	errResponse := task.ErrorHandler(output, err)
+	errCtx, errResponse := task.ErrorHandler(ctx, output, err)
 
 	// Each tasks can determine what the next task index should be to be executed
-	nextIndex := task.NextIndex(output, errResponse)
+	nextCtx, nextIndex := task.NextIndex(errCtx, output, errResponse)
 
 	if errResponse != nil {
 		logger.Error(task.Name,
@@ -86,13 +95,13 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, task Task) (i
 			zap.String("stdout", stdout.String()),
 			zap.String("stderr", stderr.String()))
 
-		return nextIndex, errResponse
+		return nextCtx, nextIndex, errResponse
 	}
 
 	// Each tasks can determine how to handle the output
-	output = task.ResponseHandler(output)
+	outputCtx, output := task.ResponseHandler(nextCtx, output)
 
 	logger.Debug(task.Name, zap.String("command", commandStr), zap.Int("nextIndex", nextIndex), zap.String("output", string(output)))
 
-	return nextIndex, errResponse
+	return outputCtx, nextIndex, errResponse
 }

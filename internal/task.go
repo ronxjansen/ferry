@@ -1,15 +1,17 @@
 package ferry
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-type ResponseHandler func([]byte) []byte
-type ErrorHandler func([]byte, error) error
-type NextIndex func([]byte, error) int
+type ResponseHandler func(ctx context.Context, output []byte) (context.Context, []byte)
+type ErrorHandler func(ctx context.Context, output []byte, err error) (context.Context, error)
+type NextIndex func(ctx context.Context, output []byte, err error) (context.Context, int)
 
 type Task struct {
 	// Name is the name of the task. It's used in logs to identify the task.
@@ -24,6 +26,8 @@ type Task struct {
 	Remote bool
 	// GetNextTaskIndex is a function that will be called to determine the next task index.
 	NextIndex NextIndex
+
+	PipeStdout bool
 }
 
 func raiseOnExitError(err error) error {
@@ -46,37 +50,44 @@ func throwDockerErrors(output []byte) error {
 	return nil
 }
 
-func defaultResponseHandler(output []byte) []byte {
-	return output
+func defaultResponseHandler(ctx context.Context, output []byte) (context.Context, []byte) {
+	return ctx, output
 }
 
-func defaultErrorHandler(output []byte, err error) error {
-	return raiseOnExitError(err)
+func defaultErrorHandler(ctx context.Context, output []byte, err error) (context.Context, error) {
+	return ctx, raiseOnExitError(err)
 }
 
 var defaultIncrement = 0
 
-func defaultNextIndex(output []byte, err error) int {
-	return defaultIncrement
+func defaultNextIndex(ctx context.Context, output []byte, err error) (context.Context, int) {
+	return ctx, defaultIncrement
 }
 
 func NewTask(command string) Task {
+	name := ""
+	if len(command) > 20 {
+		name = command[:20]
+	} else {
+		name = command
+	}
 	return Task{
 		Command:         command,
-		Name:            command[:20],
+		Name:            name,
 		ResponseHandler: defaultResponseHandler,
 		ErrorHandler:    defaultErrorHandler,
 		NextIndex:       defaultNextIndex,
 		Remote:          true,
+		PipeStdout:      false,
 	}
 }
 
 func (t Task) ThrowDockerErrors() Task {
-	t.ErrorHandler = func(output []byte, err error) error {
+	t.ErrorHandler = func(ctx context.Context, output []byte, err error) (context.Context, error) {
 		if dockerErr := throwDockerErrors(output); dockerErr != nil {
-			return dockerErr
+			return ctx, dockerErr
 		}
-		return raiseOnExitError(err)
+		return ctx, raiseOnExitError(err)
 	}
 	return t
 }
@@ -88,43 +99,67 @@ func (t Task) SetRemote(remote bool) Task {
 
 func (t Task) WithResponseHandler(handler ResponseHandler) Task {
 	originalHandler := t.ResponseHandler
-	t.ResponseHandler = func(output []byte) []byte {
-		return handler(originalHandler(output))
+	t.ResponseHandler = func(ctx context.Context, output []byte) (context.Context, []byte) {
+		ctx, out := originalHandler(ctx, output)
+		return handler(ctx, out)
 	}
 	return t
 }
 
 func (t Task) WithErrorHandler(handler ErrorHandler) Task {
 	originalHandler := t.ErrorHandler
-	t.ErrorHandler = func(output []byte, err error) error {
-		return handler(output, originalHandler(output, err))
+	t.ErrorHandler = func(ctx context.Context, output []byte, err error) (context.Context, error) {
+		ctx, err = originalHandler(ctx, output, err)
+		return handler(ctx, output, err)
 	}
 	return t
 }
 
 func (t Task) IgnoreError() Task {
-	t.ErrorHandler = func(output []byte, err error) error {
-		return nil
+	t.ErrorHandler = func(ctx context.Context, output []byte, err error) (context.Context, error) {
+		return ctx, nil
 	}
 	return t
 }
 
 func (t Task) SkipByOnError(increment int) Task {
-	t.NextIndex = func(output []byte, err error) int {
+	t.NextIndex = func(ctx context.Context, output []byte, err error) (context.Context, int) {
 		if err != nil {
-			return increment
+			return ctx, increment
 		}
-		return defaultIncrement
+		return ctx, defaultIncrement
 	}
 	return t
 }
 
 func (t Task) SkipByOnOutputMatch(increment int, match string) Task {
-	t.NextIndex = func(output []byte, err error) int {
+	t.NextIndex = func(ctx context.Context, output []byte, err error) (context.Context, int) {
 		if strings.Contains(string(output), match) {
-			return increment
+			return ctx, increment
 		}
-		return defaultIncrement
+		return ctx, defaultIncrement
+	}
+	return t
+}
+
+func (t Task) Stdout() Task {
+	t.PipeStdout = true
+	return t
+}
+
+func (t Task) Wait(delay int) Task {
+	time.Sleep(time.Duration(delay) * time.Second)
+	return t
+}
+
+type CtxKey string
+
+func (t Task) PersistOutput(name CtxKey) Task {
+	originalHandler := t.ResponseHandler
+	t.ResponseHandler = func(ctx context.Context, output []byte) (context.Context, []byte) {
+		ctx, out := originalHandler(ctx, output)
+		ctx = context.WithValue(ctx, name, strings.Trim(string(out), "\n"))
+		return ctx, out
 	}
 	return t
 }
