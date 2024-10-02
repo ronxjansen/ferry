@@ -11,13 +11,13 @@ type HealthCheck struct {
 	Path              string `yaml:"path" default:"/health"`
 	Interval          string `yaml:"interval" default:"30s"`
 	Timeout           string `yaml:"timeout" default:"5s"`
-	SuccessStatusCode int    `yaml:"success_status_code"`
+	SuccessStatusCode int    `yaml:"success_status_code" default:"200"`
 }
 
 type Config struct {
 	Domain        string      `yaml:"domain"`
 	CertResolver  string      `yaml:"cert_resolver"`
-	HealthCheck   HealthCheck `yaml:"health_check"`
+	Health        HealthCheck `yaml:"health"`
 	Image         string      `yaml:"image"`
 	Servers       []Server    `yaml:"servers"`
 	ContainerName string      `yaml:"container_name" default:"app"`
@@ -25,6 +25,8 @@ type Config struct {
 	DockerFile    string      `yaml:"docker_file" default:"./Dockerfile"`
 	DockerContext string      `yaml:"docker_context" default:"./"`
 	Port          int         `yaml:"port" default:"3000"`
+	Type          string      `yaml:"type" default:"app"`
+	Networks      []string    `yaml:"networks" default:"traefik-public"`
 }
 
 type Server struct {

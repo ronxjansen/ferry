@@ -16,7 +16,8 @@ var configFilePath string
 var dockerFilePath string
 var dockerContext string
 var envFilePath string
-var domain string
+
+// var domain string
 var certResolver string
 var appName string
 var imageName string
@@ -61,9 +62,9 @@ func buildConfig() ferry.Config {
 	if imageName != "" {
 		config.Image = imageName
 	}
-	if domain != "" {
-		config.Domain = domain
-	}
+	// if domain != "" {
+	// 	config.Domain = domain
+	// }
 	if certResolver != "" {
 		config.CertResolver = certResolver
 	}
@@ -72,8 +73,17 @@ func buildConfig() ferry.Config {
 	if config.Port == 0 {
 		config.Port = 8080
 	}
-	if config.HealthCheck.SuccessStatusCode == 0 {
-		config.HealthCheck.SuccessStatusCode = 200
+	if config.Health.SuccessStatusCode == 0 {
+		config.Health.SuccessStatusCode = 200
+	}
+	if config.Health.Path == "" {
+		config.Health.Path = "/health"
+	}
+	if config.Health.Interval == "" {
+		config.Health.Interval = "30s"
+	}
+	if config.Health.Timeout == "" {
+		config.Health.Timeout = "5s"
 	}
 	for i, server := range config.Servers {
 		if server.Port == 0 {
@@ -93,7 +103,7 @@ func Execute() {
 	rootCmd.PersistentFlags().StringVarP(&dockerContext, "docker-context", "x", "", "Path to the context of your Dockerfile")
 	rootCmd.PersistentFlags().StringVarP(&envFilePath, "env-file", "e", "", "Path to your environment variables file")
 	rootCmd.PersistentFlags().StringVarP(&imageName, "image", "i", "", "Docker image to use for your application")
-	rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
+	// rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&certResolver, "cert-resolver", "r", "", "Cert resolver to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&appName, "app-name", "a", "", "Name of your application container")
 	err := rootCmd.Execute()

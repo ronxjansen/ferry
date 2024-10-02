@@ -31,6 +31,8 @@ func (c *CommandManager) Run(roles []Role) error {
 		defer cancel()
 
 		for i := 0; i < len(roles); i++ {
+			logger.Info("Running role", zap.String("role", roles[i].Description()))
+
 			role := roles[i]
 			tasks := role.BuildTasks(c.config, ctx, server)
 

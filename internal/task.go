@@ -133,6 +133,9 @@ func (t Task) SkipByOnError(increment int) Task {
 }
 
 func (t Task) SkipByOnOutputMatch(increment int, match string) Task {
+	t.ErrorHandler = func(ctx context.Context, output []byte, err error) (context.Context, error) {
+		return ctx, nil
+	}
 	t.NextIndex = func(ctx context.Context, output []byte, err error) (context.Context, int) {
 		if strings.Contains(string(output), match) {
 			return ctx, increment

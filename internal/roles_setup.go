@@ -6,16 +6,20 @@ import (
 )
 
 var Setup = []Role{
-	// &InstallDockerRole{},
-	// &InstallSopsRole{},
+	&InstallDockerRole{},
+	&BootstrapFerryRole{},
 	&InitTraefikServiceRole{},
 }
 
 type InstallDockerRole struct{}
 
+func (s *InstallDockerRole) Description() string {
+	return "Install Docker"
+}
+
 func (s *InstallDockerRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
-		NewTask("docker --version").SkipByOnError(7),
+		NewTask("docker --version").SkipByOnOutputMatch(7, "Docker version"),
 		NewTask("sudo apt-get update"),
 		NewTask("sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common"),
 		NewTask("curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -"),
@@ -28,6 +32,10 @@ func (s *InstallDockerRole) BuildTasks(cfg Config, ctx context.Context, server S
 
 type InstallSopsRole struct{}
 
+func (s *InstallSopsRole) Description() string {
+	return "Install SOPS"
+}
+
 func (s *InstallSopsRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask("sudo apt-get update"),
@@ -38,44 +46,54 @@ func (s *InstallSopsRole) BuildTasks(cfg Config, ctx context.Context, server Ser
 	}
 }
 
+type BootstrapFerryRole struct{}
+
+func (s *BootstrapFerryRole) Description() string {
+	return "Bootstrap the ferry CLI"
+}
+
+func (s *BootstrapFerryRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	return []Task{
+		NewTask("mkdir -p $HOME/ferry"),
+		NewTask("mkdir -p $HOME/ferry/letsencrypt"),
+		NewTask("touch $HOME/ferry/letsencrypt/acme.json"),
+		NewTask("chmod 0600 $HOME/ferry/letsencrypt/acme.json"),
+	}
+}
+
 type InitTraefikServiceRole struct{}
 
 func (s *InitTraefikServiceRole) Description() string {
-	return "Initialize the traefik service on the server"
+	return "Initialize the traefik service"
 }
 
 func (s *InitTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
-		NewTask("docker network create traefik-network").IgnoreError(),
-		NewTask(`if docker ps --filter name="traefik" --format '{{.Names}}'; then
+		NewTask("docker network create --attachable traefik-network").IgnoreError(),
+		NewTask(`if [ -n "$(docker ps --filter name=traefik --format '{{.Names}}')" ]; then
 			echo "Error: Traefik container is already running"
-			exit 0
+			exit 1
 		fi`).SkipByOnOutputMatch(1, "Error: Traefik container is already running"),
 		NewTask(fmt.Sprintf(`docker run -d \
 		--name traefik \
 		--network traefik-network \
 		-p 80:80 \
 		-p 443:443 \
+		-p 8080:8080 \
 		-v /var/run/docker.sock:/var/run/docker.sock:ro \
-		-v $PWD/letsencrypt:/letsencrypt \
+		-v $HOME/ferry/letsencrypt:/letsencrypt \
 		-e TZ=UTC \
 		traefik:v3.1.4 \
 		--api.insecure=true \
 		--providers.docker=true \
-		--providers.docker.exposedbydefault=false \
+		--providers.docker.exposedbydefault=true \
 		--entrypoints.web.address=:80 \
 		--entrypoints.websecure.address=:443 \
+		--certificatesresolvers.myresolver.acme.httpchallenge=true \
+		--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web \
 		--certificatesresolvers.myresolver.acme.email=%s \
-		`, cfg.CertResolver)),
+		--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+		`, cfg.CertResolver),
+		),
 	}
-}
-
-type InitFerryConfigRole struct{}
-
-func (s *InitFerryConfigRole) Description() string {
-	return "Initialize the ferry config on the server"
-}
-
-func (s *InitFerryConfigRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
-	return []Task{}
 }

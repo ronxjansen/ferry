@@ -8,13 +8,45 @@ import (
 
 type Role interface {
 	BuildTasks(cfg Config, ctx context.Context, server Server) []Task
+	Description() string
 }
 
 func cmdf(cmd string, args ...any) string {
 	return fmt.Sprintf(cmd+" ", args...)
 }
 
+var Deploy = []Role{
+	&BootstrapAppDirRole{},
+	&PullDockerImageRole{},
+	&PrepareDeployRole{},
+	&PrepareDockerRole{},
+	&UpdateEnvVarsRole{},
+	&DeployTraefikServiceRole{},
+	&CleanUpDeployRole{},
+}
+
+type PrepareDockerRole struct{}
+
+func (s *PrepareDockerRole) Description() string {
+	return "Create Docker prerequisites"
+}
+
+func (s *PrepareDockerRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	tasks := []Task{}
+
+	for _, network := range cfg.Networks {
+		tasks = append(tasks, NewTask(cmdf(`docker network create --attachable %s`, network)).IgnoreError())
+		tasks = append(tasks, NewTask(cmdf(`docker network connect %s traefik`, network)).IgnoreError())
+	}
+
+	return tasks
+}
+
 type PrepareDeployRole struct{}
+
+func (s *PrepareDeployRole) Description() string {
+	return "Prepare docker based deploy"
+}
 
 func (s *PrepareDeployRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
@@ -31,55 +63,78 @@ func (s *PrepareDeployRole) BuildTasks(cfg Config, ctx context.Context, server S
 
 type DeployTraefikServiceRole struct{}
 
+func (s *DeployTraefikServiceRole) Description() string {
+	return "Deploy Traefik service"
+}
+
 func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	appName := ctx.Value(CtxKey("app_name")).(string)
-	oldName := ctx.Value(CtxKey("old_name")).(string)
-	port := ctx.Value(CtxKey("port")).(string)
-	portInt, err := strconv.Atoi(port)
+	portIntStr := ctx.Value(CtxKey("port")).(string)
+	portInt, err := strconv.Atoi(portIntStr)
 	if err != nil {
-		panic(err)
+		return []Task{}
 	}
 
 	// to be safe stop the app_name container if it is running
 	cmd := cmdf(`docker run -d --name %s`, appName)
-	cmd += cmdf(`--network traefik-network`)
+	for _, network := range cfg.Networks {
+		cmd += cmdf(`--network %s`, network)
+	}
+	cmd += cmdf(`--network-alias %s`, cfg.ContainerName)
 	cmd += cmdf(`--env-file %s/%s`, server.AppDir, cfg.EnvFile)
+
 	for _, volume := range server.Volumes {
 		cmd += cmdf(`--volume %s`, volume)
 	}
-	cmd += cmdf(`--publish %d:%d`, portInt, cfg.Port)
+
 	cmd += cmdf(`--label "traefik.enable=true"`)
-	cmd += cmdf(`--label "traefik.http.routers.%s.rule=Host('%s')"`, appName, cfg.Domain)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, appName, cfg.Port)
-	cmd += cmdf(`--label "traefik.http.routers.%s.service=%s"`, appName)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, appName, cfg.Port)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.path=%s"`, appName, cfg.HealthCheck.Path)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.interval=%s"`, appName, cfg.HealthCheck.Interval)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.timeout=%s"`, appName, cfg.HealthCheck.Timeout)
-	cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.success_status_code=%d"`, appName, cfg.HealthCheck.SuccessStatusCode)
+
+	if cfg.Type == "app" {
+		cmd += cmdf(`--publish %d:%d`, portInt, cfg.Port)
+		// cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.path=%s"`, appName, cfg.Health.Path)
+		// cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.interval=%s"`, appName, cfg.Health.Interval)
+		// cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.timeout=%s"`, appName, cfg.Health.Timeout)
+		// cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.healthcheck.status=%d"`, appName, cfg.Health.SuccessStatusCode)
+		cmd += cmdf(`--label "traefik.http.routers.%s.rule=Host(%s)"`, appName, fmt.Sprintf("\\`%s\\`", cfg.Domain))
+		cmd += cmdf(`--label "traefik.http.routers.%s.entrypoints=websecure"`, appName)
+		cmd += cmdf(`--label "traefik.http.routers.%s.tls.certresolver=myresolver"`, appName)
+	}
+
+	if cfg.Type == "postgres" {
+		cmd += cmdf(`--label "traefik.http.routers.%s.rule=Host(%s)"`, appName, fmt.Sprintf("\\`%s\\`", "postgres.localhost"))
+		cmd += cmdf(`--label "traefik.http.services.%s.loadbalancer.server.port=%d"`, appName, cfg.Port)
+	}
+
 	cmd += cmdf(`%s`, cfg.Image)
 
-	updateEnvVars := &UpdateEnvVarsRole{}
-	updateEnvVarsTasks := updateEnvVars.BuildTasks(cfg, ctx, server)
-
-	tasks := []Task{
+	return []Task{
 		NewTask(cmd).ThrowDockerErrors(),
+	}
+}
 
-		// wait for the service to be healthy
-		// NewTask(cmdf(`while ! curl -s -o /dev/null -w "%{http_code}" http://%s:%d | grep -q "200"; do sleep 1; done`, cfg.Domain, cfg.Port)).ThrowOnOutputMatch(1, "000"),
+type CleanUpDeployRole struct{}
 
+func (s *CleanUpDeployRole) Description() string {
+	return "Clean up deploy"
+}
+
+func (s *CleanUpDeployRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	oldName := ctx.Value(CtxKey("old_name")).(string)
+
+	return []Task{
 		NewTask(cmdf(`docker stop %s || true`, oldName)).ThrowDockerErrors(),
 		NewTask(cmdf(`docker rm %s || true`, oldName)).ThrowDockerErrors(),
-
 		// some more cleanup
 		NewTask(`docker container prune -f`).ThrowDockerErrors(),
 		NewTask(`docker image prune -f`).ThrowDockerErrors(),
 	}
-
-	return append(updateEnvVarsTasks, tasks...)
 }
 
 type UpdateEnvVarsRole struct{}
+
+func (s *UpdateEnvVarsRole) Description() string {
+	return "Update environment variables"
+}
 
 func (s *UpdateEnvVarsRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
@@ -89,6 +144,10 @@ func (s *UpdateEnvVarsRole) BuildTasks(cfg Config, ctx context.Context, server S
 
 type StopTraefikServiceRole struct{}
 
+func (s *StopTraefikServiceRole) Description() string {
+	return "Stop Traefik service"
+}
+
 func (s *StopTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask(cmdf("docker stop %s", cfg.ContainerName)),
@@ -97,6 +156,10 @@ func (s *StopTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, ser
 }
 
 type PullDockerImageRole struct{}
+
+func (s *PullDockerImageRole) Description() string {
+	return "Pull Docker image"
+}
 
 func (s *PullDockerImageRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
@@ -108,20 +171,13 @@ func (s *PullDockerImageRole) BuildTasks(cfg Config, ctx context.Context, server
 type BootstrapAppDirRole struct{}
 
 func (s *BootstrapAppDirRole) Description() string {
-	return "Bootstrap the application directory on the server if it doesn't exist"
+	return "Create app directory"
 }
 
 func (s *BootstrapAppDirRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
 	return []Task{
 		NewTask(cmdf("mkdir -p %s", server.AppDir)),
+		NewTask(cmdf("mkdir -p %s/data", server.AppDir)),
 		NewTask(cmdf("mkdir -p %s/letsencrypt", server.AppDir)),
 	}
-}
-
-var Deploy = []Role{
-	&BootstrapAppDirRole{},
-	// &SyncEnvVarsRole{},
-	&PullDockerImageRole{},
-	&PrepareDeployRole{},
-	&DeployTraefikServiceRole{},
 }
