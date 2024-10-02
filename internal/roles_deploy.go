@@ -18,6 +18,8 @@ func cmdf(cmd string, args ...any) string {
 var Deploy = []Role{
 	&BootstrapAppDirRole{},
 	&PullDockerImageRole{},
+	&BuildLocalDockerImageRole{},
+	&GetAppNameRole{},
 	&PrepareDeployRole{},
 	&PrepareDockerRole{},
 	&UpdateEnvVarsRole{},
@@ -53,7 +55,6 @@ func (s *PrepareDeployRole) BuildTasks(cfg Config, ctx context.Context, server S
 		// increment port if in use, and persist the new value in the context
 		NewTask(cmdf(`port=%d; while docker ps -a --filter "name=%s" --format "{{.Ports}}" | grep -q ":$port->"; do ((port++)); done; export port; echo $port`, cfg.Port, cfg.ContainerName)).PersistOutput(CtxKey("port")),
 
-		// create an app_name with either -blue or -green suffix, which is yet unused, and persist the new value in the context
 		NewTask(cmdf(`app_name="%s"; if docker ps -a --format '{{.Names}}' | grep -q "${app_name}-blue"; then echo "%s-green"; else echo "%s-blue"; fi;`, cfg.ContainerName, cfg.ContainerName, cfg.ContainerName)).ThrowDockerErrors().PersistOutput(CtxKey("app_name")),
 
 		// create an old name based on the app_name
@@ -155,6 +156,30 @@ func (s *StopTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, ser
 	}
 }
 
+type BuildLocalDockerImageRole struct{}
+
+func (s *BuildLocalDockerImageRole) Description() string {
+	return "Build local Docker image"
+}
+
+func (s *BuildLocalDockerImageRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	if cfg.DeployMethod != "build" {
+		return []Task{}
+	}
+
+	imageOutputPath := "image.tar"
+	return []Task{
+		NewTask(cmdf("docker build --platform linux/amd64 %s -f %s -t %s ", cfg.DockerContext, cfg.DockerFile, cfg.ContainerName)).SetRemote(false),
+		NewTask(cmdf("docker save -o %s %s", imageOutputPath, cfg.ContainerName)).SetRemote(false),
+		NewTask(cmdf("scp %s %s@%s:%s/%s", imageOutputPath, server.User, server.Host, server.AppDir, imageOutputPath)).SetRemote(false),
+		NewTask(cmdf("docker load -i %s/%s", server.AppDir, imageOutputPath)).SetRemote(true),
+		NewTask(cmdf("docker tag %s %s", cfg.Image, cfg.ContainerName)).SetRemote(true),
+		// clean up
+		NewTask(cmdf("rm %s/%s", server.AppDir, imageOutputPath)).SetRemote(true),
+		NewTask(cmdf("rm %s", imageOutputPath)).SetRemote(false),
+	}
+}
+
 type PullDockerImageRole struct{}
 
 func (s *PullDockerImageRole) Description() string {
@@ -162,6 +187,10 @@ func (s *PullDockerImageRole) Description() string {
 }
 
 func (s *PullDockerImageRole) BuildTasks(cfg Config, ctx context.Context, server Server) []Task {
+	if cfg.DeployMethod != "pull" {
+		return []Task{}
+	}
+
 	return []Task{
 		NewTask(cmdf("docker pull %s", cfg.Image)),
 		NewTask(cmdf("docker tag %s %s", cfg.Image, cfg.ContainerName)),

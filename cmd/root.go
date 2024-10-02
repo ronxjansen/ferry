@@ -17,11 +17,11 @@ var dockerFilePath string
 var dockerContext string
 var envFilePath string
 
-// var domain string
+var domain string
 var certResolver string
 var appName string
 var imageName string
-
+var deployMethod string
 var logger = prettyconsole.NewLogger(zap.DebugLevel)
 
 var rootCmd = &cobra.Command{
@@ -47,6 +47,9 @@ func buildConfig() ferry.Config {
 	}
 
 	// Merge file config with command-line arguments
+	if config.DeployMethod == "" {
+		config.DeployMethod = "pull"
+	}
 	if dockerFilePath != "" {
 		config.DockerFile = dockerFilePath
 	}
@@ -62,9 +65,9 @@ func buildConfig() ferry.Config {
 	if imageName != "" {
 		config.Image = imageName
 	}
-	// if domain != "" {
-	// 	config.Domain = domain
-	// }
+	if domain != "" {
+		config.Domain = domain
+	}
 	if certResolver != "" {
 		config.CertResolver = certResolver
 	}
@@ -76,6 +79,7 @@ func buildConfig() ferry.Config {
 	if config.Health.SuccessStatusCode == 0 {
 		config.Health.SuccessStatusCode = 200
 	}
+
 	if config.Health.Path == "" {
 		config.Health.Path = "/health"
 	}
@@ -103,9 +107,10 @@ func Execute() {
 	rootCmd.PersistentFlags().StringVarP(&dockerContext, "docker-context", "x", "", "Path to the context of your Dockerfile")
 	rootCmd.PersistentFlags().StringVarP(&envFilePath, "env-file", "e", "", "Path to your environment variables file")
 	rootCmd.PersistentFlags().StringVarP(&imageName, "image", "i", "", "Docker image to use for your application")
-	// rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
+	rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&certResolver, "cert-resolver", "r", "", "Cert resolver to use for your application")
 	rootCmd.PersistentFlags().StringVarP(&appName, "app-name", "a", "", "Name of your application container")
+	rootCmd.PersistentFlags().StringVarP(&deployMethod, "method", "m", "", "Deploy method to use for your application: pull or build")
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)

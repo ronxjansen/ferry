@@ -15,6 +15,7 @@ type HealthCheck struct {
 }
 
 type Config struct {
+	DeployMethod  string      `yaml:"deploy_method" default:"pull"`
 	Domain        string      `yaml:"domain"`
 	CertResolver  string      `yaml:"cert_resolver"`
 	Health        HealthCheck `yaml:"health"`

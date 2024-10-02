@@ -72,7 +72,12 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, ctx context.C
 	} else {
 		// Run the command locally with SSH agent forwarding
 		cmd := exec.Command("sh", "-c", commandStr)
-		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+os.Getenv("SSH_AUTH_SOCK"))
+		cmd.Env = append(os.Environ(),
+			"SSH_AUTH_SOCK="+os.Getenv("SSH_AUTH_SOCK"),
+			"DOCKER_HOST="+os.Getenv("DOCKER_HOST"),
+			"DOCKER_CERT_PATH="+os.Getenv("DOCKER_CERT_PATH"),
+			"DOCKER_TLS_VERIFY="+os.Getenv("DOCKER_TLS_VERIFY"),
+		)
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		err = cmd.Run()
