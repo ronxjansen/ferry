@@ -13,7 +13,7 @@ var execCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := buildConfig()
 		manager := ferry.NewCommandManager(cfg)
-		err := manager.Run(ferry.NewRunDockerCommandRole(args))
+		err := manager.Run(ferry.NewExecDockerCommandRole(args))
 		if err != nil {
 			logger.Fatal("Failed to remove", zap.Error(err))
 		}
