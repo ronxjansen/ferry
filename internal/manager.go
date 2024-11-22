@@ -68,7 +68,27 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, ctx context.C
 		if task.PipeStdout {
 			session.Stdout = os.Stdout
 		}
-		err = session.Run(commandStr)
+		if task.Interactive {
+			// Request PTY
+			modes := ssh.TerminalModes{
+				ssh.ECHO:          1,
+				ssh.TTY_OP_ISPEED: 14400,
+				ssh.TTY_OP_OSPEED: 14400,
+			}
+			// Get terminal size
+			if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
+				logger.Fatal("request for PTY failed", zap.Error(err), zap.String("server", server.Host))
+			}
+
+			session.Stdin = os.Stdin
+			session.Stdout = os.Stdout
+			session.Stderr = os.Stderr
+
+			// For interactive commands, use Run with the command string instead of Shell()
+			err = session.Run(commandStr)
+		} else {
+			err = session.Run(commandStr)
+		}
 	} else {
 		// Run the command locally with SSH agent forwarding
 		cmd := exec.Command("sh", "-c", commandStr)
@@ -78,9 +98,20 @@ func (c *CommandManager) runCmd(client *ssh.Client, server Server, ctx context.C
 			"DOCKER_CERT_PATH="+os.Getenv("DOCKER_CERT_PATH"),
 			"DOCKER_TLS_VERIFY="+os.Getenv("DOCKER_TLS_VERIFY"),
 		)
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err = cmd.Run()
+		if task.Interactive {
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err = cmd.Run()
+		} else {
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err = cmd.Run()
+		}
+	}
+
+	if task.Interactive {
+		return ctx, 0, err
 	}
 
 	output := stdout.Bytes()

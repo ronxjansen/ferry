@@ -16,6 +16,8 @@ type NextIndex func(ctx context.Context, output []byte, err error) (context.Cont
 type Task struct {
 	// Name is the name of the task. It's used in logs to identify the task.
 	Name string
+	// Interactive determines if the task should be run in interactive mode.
+	Interactive bool
 	// The command to run.
 	Command string
 	// ResponseHandler will determine how the app should react to the command output
@@ -89,6 +91,11 @@ func (t Task) ThrowDockerErrors() Task {
 		}
 		return ctx, raiseOnExitError(err)
 	}
+	return t
+}
+
+func (t Task) SetInteractive() Task {
+	t.Interactive = true
 	return t
 }
 
