@@ -1,0 +1,13 @@
+registry:
+  username: ronxjansen
+  password: DOCKER_REGISTRY_TOKEN
+  server: ghcr.io 
+  
+globals:
+  host: 127.0.0.1 
+  user: ubuntu # SSH user, defaults to root
+  app_dir: /home/ronxjansen # Defaults to $HOME/<container_name>
+  port: 22 # SSH port, defaults to 22
+
+containers:
+  - name: app

@@ -1,25 +1,43 @@
 image: ronxjansen/ferry:latest
 container_name: ferry
+network: ferry-network
 env_file: ./.env.production # Defaults to .env
 docker_file: ./Dockerfile # Defaults to Dockerfile ./Dockerfile
 docker_context: ./ # Defaults to current directory .
 port: 8080 # Container port, defaults to 3000
+type: app
 
 registry:
   username: ronxjansen
-  password: 
+  password: ${ DOCKER_REGISTRY_TOKEN } 
   server: ghcr.io 
 
+# add a custom command to the CLI
+commands:
+  - name: migrate
+    command: /app/bin/phx_build eval "PhxBuild.Release.migrate"
 
-
-health_check:
-  path: /health
-  success_status_code: 200
-  timeout: 5s
-  interval: 10s
+services:
+  - name: app
+    hosts: 
+      - vps
+    type: app
+    image: ronxjansen/ferry:latest
+    container_name: ferry
+    network: ferry-network
+    env_file: ./.env.production # Defaults to .env
+    docker_file: ./Dockerfile # Defaults to Dockerfile ./Dockerfile
+    docker_context: ./ # Defaults to current directory .
+    port: 8080 # Container port, defaults to 3000
+    health_check:
+      path: /health
+      success_status_code: 200
+      timeout: 5s
+      interval: 10s
 
 servers:
-  - host: 127.0.0.1 
+  - name: vps
+    host: 127.0.0.1 
     user: ubuntu # SSH user, defaults to root
     app_dir: /home/ronxjansen/ferry # Defaults to $HOME/<container_name>
     port: 22 # SSH port, defaults to 22
