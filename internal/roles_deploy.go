@@ -3,7 +3,11 @@ package ferry
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
+
+	"go.uber.org/zap"
 )
 
 type Role interface {
@@ -22,7 +26,7 @@ var Deploy = []Role{
 	&GetAppNameRole{},
 	&PrepareDeployRole{},
 	&PrepareDockerRole{},
-	&UpdateEnvVarsRole{},
+	// &UpdateEnvVarsRole{},
 	&DeployTraefikServiceRole{},
 	&CleanUpDeployRole{},
 }
@@ -82,7 +86,9 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 		cmd += cmdf(`--network %s`, network)
 	}
 	cmd += cmdf(`--network-alias %s`, cfg.ContainerName)
-	cmd += cmdf(`--env-file %s/%s`, server.AppDir, cfg.EnvFile)
+
+	cmd += buildEnvCmd(cfg.EnvFile)
+	// cmd += cmdf(`--env-file %s/%s`, server.AppDir, cfg.EnvFile)
 
 	for _, volume := range server.Volumes {
 		cmd += cmdf(`--volume %s`, volume)
@@ -111,6 +117,30 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 	return []Task{
 		NewTask(cmd).ThrowDockerErrors(),
 	}
+}
+
+// buildEnvCmd builds the env command for the docker run command
+func buildEnvCmd(envFile string) string {
+	// read the env file
+	envBytes, err := os.ReadFile(envFile)
+	if err != nil {
+		logger.Error("Failed to read env file: %s", zap.Error(err))
+		return ""
+	}
+
+	cmd := ""
+
+	// read every line in the env file
+	for _, line := range strings.Split(string(envBytes), "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		cmd += cmdf(`--env %s`, line)
+	}
+	return cmd
 }
 
 type CleanUpDeployRole struct{}

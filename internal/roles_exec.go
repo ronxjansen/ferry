@@ -33,10 +33,12 @@ func (s *ExecDockerCommandRole) BuildTasks(cfg Config, ctx context.Context, serv
 	containerName := containerNameInput.(string)
 
 	command := strings.Join(s.args, " ")
+
+	envCmd := buildEnvCmd(cfg.EnvFile)
+
 	return []Task{
-		NewTask(fmt.Sprintf("docker exec --env-file %s/%s %s sh -c '%s'",
-			server.AppDir,
-			cfg.EnvFile,
+		NewTask(fmt.Sprintf("docker exec %s %s sh -c '%s'",
+			envCmd,
 			containerName,
 			command)).ThrowDockerErrors().Stdout(),
 	}
