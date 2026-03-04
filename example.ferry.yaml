@@ -7,10 +7,10 @@ docker_context: ./ # Defaults to current directory .
 port: 8080 # Container port, defaults to 3000
 type: app
 
-registry:
-  username: ronxjansen
-  password: ${ DOCKER_REGISTRY_TOKEN } 
-  server: ghcr.io 
+# registry:
+#   username: ronxjansen
+#   password: ${ DOCKER_REGISTRY_TOKEN } 
+#   server: ghcr.io 
 
 # add a custom command to the CLI
 commands:

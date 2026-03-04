@@ -23,7 +23,7 @@ var Deploy = []Role{
 	&BootstrapAppDirRole{},
 	&PullDockerImageRole{},
 	&BuildLocalDockerImageRole{},
-	&GetAppNameRole{},
+	// &GetAppNameRole{},
 	&PrepareDeployRole{},
 	&PrepareDockerRole{},
 	// &UpdateEnvVarsRole{},
@@ -82,9 +82,7 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 
 	// to be safe stop the app_name container if it is running
 	cmd := cmdf(`docker run -d --name %s`, appName)
-	for _, network := range cfg.Networks {
-		cmd += cmdf(`--network %s`, network)
-	}
+	cmd += cmdf(`--network traefik-network`)
 	cmd += cmdf(`--network-alias %s`, cfg.ContainerName)
 
 	cmd += buildEnvCmd(cfg.EnvFile)
@@ -95,6 +93,7 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 	}
 
 	cmd += cmdf(`--label "traefik.enable=true"`)
+	cmd += cmdf(`--label "traefik.docker.network=traefik-network"`)
 
 	if cfg.Type == "app" {
 		cmd += cmdf(`--publish %d:%d`, portInt, cfg.Port)
@@ -114,9 +113,18 @@ func (s *DeployTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, s
 
 	cmd += cmdf(`%s`, cfg.Image)
 
-	return []Task{
+	tasks := []Task{
 		NewTask(cmd).ThrowDockerErrors(),
 	}
+
+	// Connect to additional networks after container starts
+	for _, network := range cfg.Networks {
+		if network != "traefik-network" {
+			tasks = append(tasks, NewTask(cmdf(`docker network connect %s %s`, network, appName)).IgnoreError())
+		}
+	}
+
+	return tasks
 }
 
 // buildEnvCmd builds the env command for the docker run command

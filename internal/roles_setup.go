@@ -83,7 +83,7 @@ func (s *InitTraefikServiceRole) BuildTasks(cfg Config, ctx context.Context, ser
 		-v /var/run/docker.sock:/var/run/docker.sock:ro \
 		-v $HOME/ferry/letsencrypt:/letsencrypt \
 		-e TZ=UTC \
-		traefik:v3.1.4 \
+		traefik:latest \
 		--api.insecure=true \
 		--providers.docker=true \
 		--providers.docker.exposedbydefault=true \
