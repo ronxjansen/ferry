@@ -76,24 +76,35 @@ Ferry is intended to be less opinionated (you can use it without sops), has supp
 
 ## Roadmap
 
-- [ ] Deploy databases (using docker or docker compose)
-- [ ] Add `vps doctor` command to check if your VPS is ready to go (has docker, ssh access)
-- [ ] Support multiple server nodes 
-- [ ] Add `init` command to create a configuration
+v0.1
+- [ ] Deploy databases 
+- [ ] Support migrations
+
+v0.1.1
+- [ ] Support all docker compose features, depends_on, env vars, health checks, volumes, networks, labels, etc as individual features on exec
+- [ ] Use docker compose as source of truth and ferry config as overrides
+
+v0.2
+- [ ] Make CLI output cleaner. Add --verobse and --json flags to deploy command
+- [ ] Generate a preview of the changes before applying them
+- [ ] Add status command that shows config, current state and diff. Also some stats from docker stats
 - [ ] Parse current Config and parse current docker containers running and build config state from that
 - [ ] Add SOPS, or Infisical or Ansible Vault support (maye can we manage this through a CLI / interactive editor?)
+- [ ] Support more docker registry types (gcr, gcp, ecr, etc.)
+
+v0.3
+- [ ] Asset bridging
+- [ ] Add `vps doctor` command to check if your VPS is ready to go (has docker, ssh access)
+- [ ] Support multiple server nodes 
+- [ ] Add `init` command to create a configuration - a tui based wizard to generate a config yaml
 - [ ] Local build and deploy
-- [ ] Generate a preview of the changes before applying them
 - [ ] Hooks - run scripts before, during and after deploy
-- [ ] Docker compose support
-- [ ] Migrations
 - [ ] Rolling restarts
 - [ ] Rollback
 - [ ] Better zero downtime deployment (we now only rely on Traefik)
 - [ ] Add support for more Linux distros
-- [ ] Asset bridging
 - [ ] Minimal dashboard + metrics in a terminal UI (traffic, CPU, memory, etc.)
-- [ ] Use Kamal-proxy instead of Traefik?
+- [ ] Use Kamal-proxy instead of Traefik? Make the proxy optionalable. Users can deploy with Traefik proxy as well.  
 
 ## Out of scope
 
@@ -103,4 +114,3 @@ At least for the forseeable future, the following features are not in scope:
 - VPS provisioning (setting up Traefik, Docker, SOPS, etc.)
 - VPS SSH and firewall hardening
 - Windows support
-- Docker compose support

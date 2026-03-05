@@ -7,10 +7,59 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// HookType represents lifecycle hook types
+type HookType string
+
+const (
+	HookPreBuild    HookType = "pre_build"     // Before image build/pull (local)
+	HookPreDeploy   HookType = "pre_deploy"    // Before container start (remote)
+	HookPostDeploy  HookType = "post_deploy"   // After deploy complete (remote)
+	HookPostAppBoot HookType = "post_app_boot" // After health check passes (remote)
+)
+
+// Hook defines commands to run at lifecycle points
+type Hook struct {
+	Commands []string `yaml:"commands,flow"` // Inline commands
+	Script   string   `yaml:"script"`        // Path to script file
+}
+
+// DependsOnCondition defines dependency conditions (Docker Compose style)
+type DependsOnCondition string
+
+const (
+	ConditionStarted   DependsOnCondition = "service_started"
+	ConditionHealthy   DependsOnCondition = "service_healthy"
+	ConditionCompleted DependsOnCondition = "service_completed_successfully"
+)
+
+// Dependency defines a service dependency
+type Dependency struct {
+	Service   string             `yaml:"service"`
+	Condition DependsOnCondition `yaml:"condition"`
+}
+
+// AppType defines the type of application
+type AppType string
+
+const (
+	AppTypeApp     AppType = "app"     // Default: proxy-enabled
+	AppTypeService AppType = "service" // No proxy (databases, etc)
+	AppTypeJob     AppType = "job"     // One-shot (migrations)
+)
+
+// Command defines a custom CLI command
+type Command struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Command     string `yaml:"command"`
+}
+
 type Config struct {
-	Servers []Server `yaml:"servers"`
-	Proxy   Proxy    `yaml:"proxy"`
-	Apps    []App    `yaml:"apps"`
+	Servers  []Server            `yaml:"servers"`
+	Proxy    Proxy               `yaml:"proxy"`
+	Apps     []App               `yaml:"apps"`
+	Hooks    map[HookType]Hook   `yaml:"hooks"`    // Global hooks
+	Commands []Command           `yaml:"commands"` // Custom CLI commands
 }
 
 type Server struct {
@@ -28,24 +77,32 @@ type Proxy struct {
 }
 
 type App struct {
-	Name          string      `yaml:"name"`
-	Server        string      `yaml:"server"`
-	Image         string      `yaml:"image"`
-	Port          int         `yaml:"port"`
-	Domain        string      `yaml:"domain"`
-	DeployMethod  string      `yaml:"deploy_method"`
-	EnvFile       string      `yaml:"env_file"`
-	DockerFile    string      `yaml:"docker_file"`
-	DockerContext string      `yaml:"docker_context"`
-	Networks      []string    `yaml:"networks"`
-	Volumes       []string    `yaml:"volumes"`
-	Health        HealthCheck `yaml:"health"`
+	Name          string              `yaml:"name"`
+	Server        string              `yaml:"server"`
+	Image         string              `yaml:"image"`
+	Port          int                 `yaml:"port"`
+	Domain        string              `yaml:"domain"`
+	DeployMethod  string              `yaml:"deploy_method"`
+	EnvFile       string              `yaml:"env_file"`
+	DockerFile    string              `yaml:"docker_file"`
+	DockerContext string              `yaml:"docker_context"`
+	Networks      []string            `yaml:"networks"`
+	Volumes       []string            `yaml:"volumes"`
+	Health        HealthCheck         `yaml:"health"`
+	Type          AppType             `yaml:"type"`       // app, service, or job
+	Command       []string            `yaml:"command"`    // Container command override
+	DependsOn     []Dependency        `yaml:"depends_on"` // Service dependencies
+	Hooks         map[HookType]Hook   `yaml:"hooks"`      // App-specific hooks
+	Env           map[string]string   `yaml:"env"`        // Inline environment variables
 }
 
 type HealthCheck struct {
-	Path     string `yaml:"path"`
-	Interval string `yaml:"interval"`
-	Timeout  string `yaml:"timeout"`
+	Path        string   `yaml:"path"`
+	Interval    string   `yaml:"interval"`
+	Timeout     string   `yaml:"timeout"`
+	Test        []string `yaml:"test"`         // Health check command (e.g., ["CMD-SHELL", "pg_isready"])
+	Retries     int      `yaml:"retries"`      // Number of retries before unhealthy
+	StartPeriod string   `yaml:"start_period"` // Time to wait before starting checks
 }
 
 // Load reads and parses a ferry.yaml config file
@@ -91,6 +148,9 @@ func (c *Config) setDefaults() {
 		if c.Apps[i].DeployMethod == "" {
 			c.Apps[i].DeployMethod = "pull"
 		}
+		if c.Apps[i].Type == "" {
+			c.Apps[i].Type = AppTypeApp
+		}
 		if c.Apps[i].Health.Path == "" {
 			c.Apps[i].Health.Path = "/health"
 		}
@@ -100,8 +160,17 @@ func (c *Config) setDefaults() {
 		if c.Apps[i].Health.Timeout == "" {
 			c.Apps[i].Health.Timeout = "5s"
 		}
-		// Ensure app is connected to proxy network
-		if len(c.Apps[i].Networks) == 0 {
+		if c.Apps[i].Health.Retries == 0 {
+			c.Apps[i].Health.Retries = 3
+		}
+		// Set default dependency condition
+		for j := range c.Apps[i].DependsOn {
+			if c.Apps[i].DependsOn[j].Condition == "" {
+				c.Apps[i].DependsOn[j].Condition = ConditionStarted
+			}
+		}
+		// Ensure app is connected to proxy network (only for app type)
+		if len(c.Apps[i].Networks) == 0 && c.Apps[i].Type == AppTypeApp {
 			c.Apps[i].Networks = []string{c.Proxy.Network}
 		}
 	}
@@ -146,6 +215,25 @@ func (c *Config) AppNames() []string {
 	names := make([]string, len(c.Apps))
 	for i, a := range c.Apps {
 		names[i] = a.Name
+	}
+	return names
+}
+
+// GetCommand returns a command by name
+func (c *Config) GetCommand(name string) (*Command, error) {
+	for i := range c.Commands {
+		if c.Commands[i].Name == name {
+			return &c.Commands[i], nil
+		}
+	}
+	return nil, fmt.Errorf("command not found: %s", name)
+}
+
+// CommandNames returns a list of all command names
+func (c *Config) CommandNames() []string {
+	names := make([]string, len(c.Commands))
+	for i, cmd := range c.Commands {
+		names[i] = cmd.Name
 	}
 	return names
 }
