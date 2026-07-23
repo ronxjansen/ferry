@@ -307,6 +307,11 @@ func buildDockerRunCommand(app *config.App, containerName string, p proxy.Proxy)
 		parts = append(parts, fmt.Sprintf("--label '%s'", label))
 	}
 
+	// Add published ports
+	for _, pub := range app.Ports {
+		parts = append(parts, fmt.Sprintf("--publish %s", pub))
+	}
+
 	// Add image
 	parts = append(parts, app.Image)
 
@@ -352,6 +357,11 @@ func buildServiceRunCommand(app *config.App, containerName string) string {
 	// Add volumes
 	for _, vol := range app.Volumes {
 		parts = append(parts, fmt.Sprintf("--volume %s", vol))
+	}
+
+	// Add published ports
+	for _, pub := range app.Ports {
+		parts = append(parts, fmt.Sprintf("--publish %s", pub))
 	}
 
 	// Add image

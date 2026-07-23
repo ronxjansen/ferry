@@ -88,6 +88,7 @@ type App struct {
 	DockerContext string              `yaml:"docker_context"`
 	Networks      []string            `yaml:"networks"`
 	Volumes       []string            `yaml:"volumes"`
+	Ports         []string            `yaml:"ports"` // host publish, e.g. "127.0.0.1:18789:18789"
 	Health        HealthCheck         `yaml:"health"`
 	Type          AppType             `yaml:"type"`       // app, service, or job
 	Command       []string            `yaml:"command"`    // Container command override
