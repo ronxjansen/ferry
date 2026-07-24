@@ -173,3 +173,46 @@ func TestProxyRunPublishesConfiguredPorts(t *testing.T) {
 		t.Errorf("custom ports not honored: %v", args)
 	}
 }
+
+func TestConfigHash(t *testing.T) {
+	svc := types.ServiceConfig{
+		Volumes: []types.ServiceVolumeConfig{{Type: "volume", Source: "dbdata", Target: "/var/lib/postgresql/data"}},
+		Ports:   []types.ServicePortConfig{{Target: 5432, Published: "5432"}},
+	}
+	opts := RunOpts{
+		Name: "myapp-db", Project: "myapp", Service: "db", Version: "abc123",
+		Network: "ferry", EnvFile: "/tmp/env-1", Detach: true, PublishPorts: true,
+	}
+	env := []byte("POSTGRES_PASSWORD=s3cret\n")
+	base := ConfigHash(svc, "postgres:16", opts, env)
+
+	// The deploy version and the env temp-file path change every deploy; they
+	// must not bounce a stateful container.
+	moved := opts
+	moved.Version = "def456"
+	moved.EnvFile = "/tmp/env-2"
+	if got := ConfigHash(svc, "postgres:16", moved, env); got != base {
+		t.Errorf("hash must ignore version and env-file path: %q != %q", got, base)
+	}
+
+	if got := ConfigHash(svc, "postgres:17", opts, env); got == base {
+		t.Error("image change must change the hash")
+	}
+	if got := ConfigHash(svc, "postgres:16", opts, []byte("POSTGRES_PASSWORD=rotated\n")); got == base {
+		t.Error("env content change must change the hash")
+	}
+	changed := svc
+	changed.Ports = []types.ServicePortConfig{{Target: 5432, Published: "127.0.0.1:5432"}}
+	if got := ConfigHash(changed, "postgres:16", opts, env); got == base {
+		t.Error("compose port change must change the hash")
+	}
+}
+
+func TestRunCarriesConfigHashLabel(t *testing.T) {
+	args := Run(types.ServiceConfig{}, "postgres:16", RunOpts{
+		Name: "myapp-db", Project: "myapp", Service: "db", Version: "abc", ConfigHash: "deadbeef1234", Detach: true,
+	})
+	if !strings.Contains(argvString(args), "--label ferry.config-hash=deadbeef1234") {
+		t.Errorf("config-hash label missing:\n%s", argvString(args))
+	}
+}

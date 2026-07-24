@@ -80,6 +80,9 @@ func Load(cfg *config.Config) (*Plan, error) {
 		if svc.Build == nil && svc.Image == "" {
 			return nil, fmt.Errorf("service %q has neither build nor image in compose", name)
 		}
+		if overlay.Stateful && svc.Build != nil {
+			return nil, fmt.Errorf("service %q is stateful but has build: in compose; stateful services deploy a pinned image (postgres:16, redis:7, ...), not per-version builds", name)
+		}
 		if t.Proxied() && t.Port() == 0 {
 			return nil, fmt.Errorf("service %q is proxied but has no port (set services.%s.port in ferry.yaml, or expose/ports in compose)", name, name)
 		}
@@ -129,6 +132,13 @@ func (p *Plan) Select(names []string) ([]*Target, error) {
 // a domain, or an explicit port (which gets an sslip.io fallback domain).
 func (t *Target) Proxied() bool {
 	return len(t.Overlay.AllDomains()) > 0 || t.Overlay.Port != 0
+}
+
+// Stateful reports whether the service converges in place: stable container
+// name, recreated only when its effective configuration changes — never
+// bounced just because the app version moved.
+func (t *Target) Stateful() bool {
+	return t.Overlay.Stateful
 }
 
 // Port returns the container port the proxy targets: the overlay port, else
@@ -217,8 +227,13 @@ func (t *Target) ImageRef(version string) string {
 }
 
 // ContainerName returns the versioned container name (Kamal-style: no
-// renames, no color juggling).
+// renames, no color juggling). Stateful services get a stable, project-
+// prefixed name instead (container names are host-global): their lifecycle
+// follows config changes, not app versions.
 func (t *Target) ContainerName(version string) string {
+	if t.Overlay.Stateful {
+		return fmt.Sprintf("%s-%s", t.cfg.Name, t.Name)
+	}
 	return fmt.Sprintf("%s-%s", t.Name, version)
 }
 
@@ -254,10 +269,16 @@ func (p *Plan) CrossServerEnv(target *Target, server *config.Server) map[string]
 }
 
 // Warnings returns non-fatal config issues: depends_on edges that cross
-// servers, where startup ordering is only best-effort.
+// servers, where startup ordering is only best-effort, and stateful services
+// whose data would not survive a recreation.
 func (p *Plan) Warnings() []string {
 	var out []string
 	for _, t := range p.Targets {
+		if t.Stateful() && len(t.Compose.Volumes) == 0 {
+			out = append(out, fmt.Sprintf(
+				"service %q is stateful but mounts no volumes: a config change recreates the container and its data is lost",
+				t.Name))
+		}
 		for depName := range t.Compose.DependsOn {
 			dep, err := p.Target(depName)
 			if err != nil {

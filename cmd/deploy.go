@@ -11,6 +11,7 @@ var (
 	deployVersion   string
 	deploySkipBuild bool
 	deployTimeout   time.Duration
+	deployRecreate  bool
 )
 
 var deployCmd = &cobra.Command{
@@ -50,6 +51,7 @@ leaves the running version untouched.`,
 		if deployVersion != "" && !cmd.Flags().Changed("skip-build") {
 			d.SkipBuild = true
 		}
+		d.Recreate = deployRecreate
 
 		started := time.Now()
 		err = lock.With(d.Host(d.PrimaryServer()), p.Config.Name, performer(), version, "deploy", func() error {
@@ -67,5 +69,6 @@ func init() {
 	deployCmd.Flags().StringVar(&deployVersion, "version", "", "Redeploy a specific version (git SHA) already on the host; implies --skip-build")
 	deployCmd.Flags().BoolVar(&deploySkipBuild, "skip-build", false, "Fail instead of building when the image is missing")
 	deployCmd.Flags().DurationVar(&deployTimeout, "timeout", 5*time.Minute, "Health-gate and job timeout")
+	deployCmd.Flags().BoolVar(&deployRecreate, "recreate", false, "Force fresh containers even when nothing changed (bounces stateful services)")
 	rootCmd.AddCommand(deployCmd)
 }

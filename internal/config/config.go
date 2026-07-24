@@ -91,16 +91,17 @@ type Health struct {
 // Service is the ferry.yaml overlay on a compose service. The key must exist
 // in the compose project.
 type Service struct {
-	Name    string            `yaml:"-"`
-	Servers []string          `yaml:"servers"`
-	Domain  string            `yaml:"domain"`
-	Domains []string          `yaml:"domains"`
-	Port    int               `yaml:"port"`
-	Health  Health            `yaml:"health"`
-	Proxy   map[string]string `yaml:"proxy"` // passthrough kamal-proxy deploy flags
-	EnvFile string            `yaml:"env_file"`
-	Build   string            `yaml:"build"` // per-service override of build.method
-	Job     bool              `yaml:"job"`
+	Name     string            `yaml:"-"`
+	Servers  []string          `yaml:"servers"`
+	Domain   string            `yaml:"domain"`
+	Domains  []string          `yaml:"domains"`
+	Port     int               `yaml:"port"`
+	Health   Health            `yaml:"health"`
+	Proxy    map[string]string `yaml:"proxy"` // passthrough kamal-proxy deploy flags
+	EnvFile  string            `yaml:"env_file"`
+	Build    string            `yaml:"build"` // per-service override of build.method
+	Job      bool              `yaml:"job"`
+	Stateful bool              `yaml:"stateful"` // converge in place: stable container, recreated only on config change
 }
 
 // AllDomains returns domain + domains merged.
@@ -259,6 +260,12 @@ func (c *Config) validate() error {
 		}
 		if svc.Build != "" && svc.Build != "remote" && svc.Build != "pull" {
 			return fmt.Errorf("service %q: build must be \"remote\" or \"pull\"", name)
+		}
+		if svc.Stateful && svc.Job {
+			return fmt.Errorf("service %q: stateful and job are mutually exclusive", name)
+		}
+		if svc.Stateful && (len(svc.AllDomains()) > 0 || svc.Port != 0) {
+			return fmt.Errorf("service %q: stateful services cannot be proxied (remove domain/domains/port)", name)
 		}
 	}
 	if m := c.Build.Method; m != "" && m != "remote" && m != "pull" {

@@ -92,8 +92,16 @@ services:
     # command, depends_on, volumes, networks, image — all come from compose.
 
   db:
-    servers: [vps-1]             # a "database" is just an unproxied service
-                                 # with a compose volume. No accessory concept.
+    servers: [vps-1]
+    stateful: true               # converge, don't bounce: stable container name
+                                 # (myapp-db), left running across deploys and
+                                 # only recreated when its own config changed —
+                                 # image, env, ports, volumes, command. Excluded
+                                 # from rollback/prune (data lives in volumes).
+                                 # Force a bounce with ferry deploy --recreate.
+                                 # Cannot be combined with domain/port or job,
+                                 # and the compose service must be image-only
+                                 # (postgres:16, redis:7, ...), not build:.
 
   migrate:
     servers: [vps-1]

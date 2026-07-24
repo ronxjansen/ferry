@@ -4,6 +4,8 @@
 package dockercmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,10 +17,11 @@ import (
 // Ferry container labels; these drive ps, pruning, rollback and preview
 // discovery — state lives on the server, not in local files.
 const (
-	LabelProject = "ferry.project"
-	LabelService = "ferry.service"
-	LabelVersion = "ferry.version"
-	LabelPreview = "ferry.preview"
+	LabelProject    = "ferry.project"
+	LabelService    = "ferry.service"
+	LabelVersion    = "ferry.version"
+	LabelPreview    = "ferry.preview"
+	LabelConfigHash = "ferry.config-hash"
 )
 
 // ProxyContainerName is the kamal-proxy container name on each server.
@@ -42,8 +45,9 @@ type RunOpts struct {
 	Network      string // network to start on
 	EnvFile      string // local merged env file (delivered via API, not argv)
 	Detach       bool
-	Rm           bool // one-shot jobs
-	PublishPorts bool // publish compose ports: entries (unproxied services)
+	Rm           bool   // one-shot jobs
+	PublishPorts bool   // publish compose ports: entries (unproxied services)
+	ConfigHash   string // stateful services: digest of the creation config
 }
 
 // Run builds `docker run` argv for a compose service. Compose provides
@@ -119,11 +123,33 @@ func Labels(svc types.ServiceConfig, o RunOpts) []string {
 	if o.Preview != "" {
 		labels = append(labels, fmt.Sprintf("%s=%s", LabelPreview, o.Preview))
 	}
+	if o.ConfigHash != "" {
+		labels = append(labels, fmt.Sprintf("%s=%s", LabelConfigHash, o.ConfigHash))
+	}
 	for k, v := range svc.Labels {
 		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
 	}
 	sort.Strings(labels)
 	return labels
+}
+
+// ConfigHash digests everything a container is created from — the full
+// `docker run` argv (image, command, entrypoint, ports, volumes, healthcheck,
+// labels, network) plus the merged env content — so a stateful service is
+// recreated exactly when one of those inputs changes. The deploy version and
+// the env-file temp path are excluded: they vary per deploy without changing
+// the container; env changes register through the env content instead.
+func ConfigHash(svc types.ServiceConfig, image string, o RunOpts, env []byte) string {
+	o.Version = ""
+	o.EnvFile = ""
+	o.ConfigHash = ""
+	h := sha256.New()
+	for _, arg := range Run(svc, image, o) {
+		h.Write([]byte(arg))
+		h.Write([]byte{0})
+	}
+	h.Write(env)
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 func volumeSpec(v types.ServiceVolumeConfig, project string) string {

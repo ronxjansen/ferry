@@ -30,6 +30,7 @@ type Deployer struct {
 	Performer string
 	Timeout   time.Duration
 	SkipBuild bool
+	Recreate  bool // force fresh containers even when nothing changed
 
 	Log func(format string, args ...any)
 
@@ -134,7 +135,7 @@ func (d *Deployer) deployOne(t *plan.Target, s *config.Server, started time.Time
 	// Reusing an existing same-version container is only safe when nothing it
 	// was created with has changed; env changes and dirty-tree deploys force a
 	// fresh container.
-	recreate := envChanged || strings.HasSuffix(d.Version, "-dirty")
+	recreate := envChanged || strings.HasSuffix(d.Version, "-dirty") || d.Recreate
 
 	if err := d.hookRunner().RunRemote(host, config.HookPreDeploy, d.hookEnv(t, s, started)); err != nil {
 		return err
@@ -164,11 +165,16 @@ func (d *Deployer) deployOne(t *plan.Target, s *config.Server, started time.Time
 	old := d.runningContainers(dk, t.Name, "")
 	delete(old, opts.Name)
 
-	if t.Proxied() {
+	switch {
+	case t.Stateful():
+		if err := d.converge(dk, t, s, image, opts, old); err != nil {
+			return err
+		}
+	case t.Proxied():
 		if err := d.cutover(dk, t, s, image, opts, old, recreate); err != nil {
 			return err
 		}
-	} else {
+	default:
 		if err := d.restartInPlace(dk, t, image, opts, old); err != nil {
 			return err
 		}
@@ -234,6 +240,64 @@ func (d *Deployer) cutover(dk *exec.Docker, t *plan.Target, s *config.Server, im
 		dk.Run("stop", id)
 	}
 	d.logf("%s@%s: live at %s", t.Name, s.Name, strings.Join(t.DomainsOn(s), ", "))
+	return nil
+}
+
+// converge deploys a stateful service (db, redis, ...): the container has a
+// stable name, and deploys leave it running untouched unless its creation
+// config — image, merged env, ports, volumes, command — actually changed, as
+// recorded in the ferry.config-hash label. Only a real change (or --recreate)
+// bounces it; the app version moving does not.
+func (d *Deployer) converge(dk *exec.Docker, t *plan.Target, s *config.Server, image string, opts dockercmd.RunOpts, old map[string]string) error {
+	var env []byte
+	if opts.EnvFile != "" {
+		var err error
+		if env, err = os.ReadFile(opts.EnvFile); err != nil {
+			return err
+		}
+	}
+	opts.ConfigHash = dockercmd.ConfigHash(t.Compose, image, opts, env)
+
+	state := d.containerState(dk, opts.Name)
+	unchanged := !d.Recreate && d.containerLabel(dk, opts.Name, dockercmd.LabelConfigHash) == opts.ConfigHash
+	if state == "running" && unchanged {
+		d.logf("%s@%s: unchanged, leaving %s running", t.Name, s.Name, opts.Name)
+		return nil
+	}
+
+	// Anything else running under this service label (pre-stateful versioned
+	// names, crashed strays) stops before the new container starts: a
+	// single-writer store must never run twice. No rollback value either —
+	// state lives in volumes — so remove them outright.
+	for id := range old {
+		d.logf("%s@%s: stopping %s", t.Name, s.Name, id)
+		if _, err := dk.Run("stop", id); err != nil {
+			return err
+		}
+		dk.Run("rm", id)
+	}
+
+	if state != "" && unchanged {
+		d.logf("%s@%s: starting stopped %s", t.Name, s.Name, opts.Name)
+		if _, err := dk.Run("start", opts.Name); err != nil {
+			return err
+		}
+	} else {
+		if state != "" {
+			d.logf("%s@%s: config changed, recreating %s", t.Name, s.Name, opts.Name)
+			dk.Run("stop", opts.Name)
+			dk.Run("rm", "-f", opts.Name)
+		} else {
+			d.logf("%s@%s: starting %s", t.Name, s.Name, opts.Name)
+		}
+		if err := d.startContainer(dk, t, image, opts); err != nil {
+			return err
+		}
+	}
+	if err := d.waitHealthy(dk, opts.Name); err != nil {
+		logs, _ := dk.Run("logs", "--tail", "50", opts.Name)
+		return fmt.Errorf("%w\ncontainer logs:\n%s", err, logs)
+	}
 	return nil
 }
 
@@ -545,6 +609,15 @@ func (d *Deployer) runningContainers(dk *exec.Docker, service, preview string) m
 	return containers
 }
 
+// containerLabel returns one label of a container, "" when absent.
+func (d *Deployer) containerLabel(dk *exec.Docker, name, label string) string {
+	out, err := dk.Run("inspect", "--format", fmt.Sprintf("{{index .Config.Labels %q}}", label), name)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // containerState returns .State.Status for a container, "" when absent.
 func (d *Deployer) containerState(dk *exec.Docker, name string) string {
 	out, err := dk.Run("inspect", "--format", "{{.State.Status}}", name)
@@ -573,8 +646,12 @@ func (d *Deployer) waitHealthy(dk *exec.Docker, name string) error {
 }
 
 // Prune keeps the last build.retain stopped containers per service (the
-// rollback depth) and removes older ones with their images.
+// rollback depth) and removes older ones with their images. Stateful services
+// have nothing retained: one stable container, no version history.
 func (d *Deployer) Prune(dk *exec.Docker, t *plan.Target) error {
+	if t.Stateful() {
+		return nil
+	}
 	out, _ := dk.Run("ps", "--all", "--filter", "status=exited",
 		"--filter", fmt.Sprintf("label=%s=%s", dockercmd.LabelProject, d.cfg().Name),
 		"--filter", fmt.Sprintf("label=%s=%s", dockercmd.LabelService, t.Name),

@@ -101,6 +101,16 @@ services:
 commands:
   broken: {command: echo hi}
 `, "needs either service or server"},
+		{"stateful job conflict", `
+servers: {vps-1: 1.2.3.4}
+services:
+  db: {servers: [vps-1], stateful: true, job: true}
+`, "mutually exclusive"},
+		{"stateful cannot be proxied", `
+servers: {vps-1: 1.2.3.4}
+services:
+  db: {servers: [vps-1], stateful: true, domain: db.example.com}
+`, "cannot be proxied"},
 		{"unknown top-level key (traefik is gone)", `
 servers: {vps-1: 1.2.3.4}
 proxy: {type: traefik}

@@ -49,6 +49,7 @@ services:
     servers: [vps-2]
   db:
     servers: [vps-1]
+    stateful: true
   migrate:
     servers: [vps-1]
     job: true
@@ -132,6 +133,12 @@ func TestTargetResolution(t *testing.T) {
 	if got := db.ImageRef("abc123"); got != "postgres:16" {
 		t.Errorf("image-only services deploy the compose image verbatim, got %q", got)
 	}
+	if !db.Stateful() {
+		t.Error("db is marked stateful in the overlay")
+	}
+	if got := db.ContainerName("abc123"); got != "myapp-db" {
+		t.Errorf("stateful container name = %q, want stable project-prefixed myapp-db (a versioned name would bounce the db every deploy)", got)
+	}
 
 	migrate, _ := p.Target("migrate")
 	if !migrate.Overlay.Job {
@@ -176,6 +183,61 @@ func TestCrossServerWarnings(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("worker→db crosses servers and must warn; got %v", warnings)
+	}
+}
+
+func TestStatefulRejectsBuild(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(composeYAML), 0o644)
+	os.WriteFile(filepath.Join(dir, "ferry.yaml"), []byte(`
+name: myapp
+servers: {vps-1: 1.2.3.4}
+services:
+  web: {servers: [vps-1], stateful: true}
+`), 0o644)
+	cfg, err := config.Load(filepath.Join(dir, "ferry.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Load(cfg)
+	if err == nil || !strings.Contains(err.Error(), "stateful") {
+		t.Errorf("stateful + compose build: must be rejected, got %v", err)
+	}
+}
+
+func TestStatefulVolumeWarning(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(composeYAML), 0o644)
+	os.WriteFile(filepath.Join(dir, "ferry.yaml"), []byte(`
+name: myapp
+servers: {vps-1: 1.2.3.4}
+services:
+  mailhog: {servers: [vps-1], stateful: true}
+`), 0o644)
+	cfg, err := config.Load(filepath.Join(dir, "ferry.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range p.Warnings() {
+		if strings.Contains(w, "mounts no volumes") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("stateful service without volumes must warn about data loss; got %v", p.Warnings())
+	}
+
+	// db mounts a named volume: no warning wanted.
+	full := loadTestPlan(t)
+	for _, w := range full.Warnings() {
+		if strings.Contains(w, "mounts no volumes") {
+			t.Errorf("db has a volume and must not warn: %v", w)
+		}
 	}
 }
 

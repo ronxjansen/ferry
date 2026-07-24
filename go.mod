@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/compose-spec/compose-go/v2 v2.13.0
+	github.com/moby/patternmatcher v0.6.1
 	github.com/spf13/cobra v1.8.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -15,7 +16,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
-	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect

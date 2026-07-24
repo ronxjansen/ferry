@@ -46,6 +46,15 @@ A compose file with ten services works the same way: list each one under
 several machines each. Unlisted compose services (mailhog, a local db UI) are
 simply not deployed — that's the local/remote split.
 
+Databases and other single-instance stores (`postgres:16`, `redis:7`) get
+`stateful: true` in `ferry.yaml`. They keep a stable container name
+(`<project>-<service>`) and deploys **converge instead of bounce**: the
+container is left running untouched unless something it was created from
+actually changed — image, merged env, ports, volumes, command — tracked via a
+config-hash label on the container. Rollback and pruning skip stateful
+services (their state lives in volumes, not in version history), and
+`ferry deploy --recreate` forces a fresh container when you want one anyway.
+
 The two pillars:
 
 1. **kamal-proxy owns traffic.** `kamal-proxy deploy` blocks until the new
@@ -128,7 +137,8 @@ commands.
 4. **Fail safe, not fail forward.** The proxy refuses to cut over to an
    unhealthy target; failures leave the running version serving. Unproxied
    services restart in place (single-writer stores must not run twice) — a
-   brief blip, accepted and documented.
+   brief blip, accepted and documented. `stateful: true` services skip even
+   that: they only restart when their own configuration changed.
 5. **State lives on the server** — retained containers, env files, lock,
    audit log. `ferry.yaml` stays committable and machine-independent.
 6. **Unix-y CLI.** One verb per command, non-interactive by default, stable

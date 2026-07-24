@@ -24,7 +24,9 @@ func (d *Deployer) Rollback(targets []*plan.Target, version string) error {
 	// anything — fail safe, not fail forward.
 	var steps []step
 	for _, t := range targets {
-		if t.Overlay.Job {
+		// Jobs have nothing to restart; stateful services have no version
+		// history to roll between — their data lives in volumes.
+		if t.Overlay.Job || t.Stateful() {
 			continue
 		}
 		for _, s := range t.Servers {
