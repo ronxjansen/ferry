@@ -1,42 +1,51 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/ronxjansen/ferry/internal/config"
+	"github.com/ronxjansen/ferry/internal/plan"
 	"github.com/spf13/cobra"
-	prettyconsole "github.com/thessem/zap-prettyconsole"
-	"go.uber.org/zap"
 )
 
-var (
-	configFilePath string
-	cfg            *config.Config
-	logger         = prettyconsole.NewLogger(zap.DebugLevel)
-)
+// Version is the ferry CLI version.
+const Version = "0.2.0"
+
+var configFilePath string
 
 var rootCmd = &cobra.Command{
-	Use:   "ferry",
-	Short: "Deploy apps to your VPS without vendor lock-in",
-	Long:  `Ferry deploys containerized applications to VPS servers with automatic TLS via Traefik.`,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip config loading for commands that don't need it
-		if cmd.Name() == "help" || cmd.Name() == "version" {
-			return nil
-		}
-
-		var err error
-		cfg, err = config.Load(configFilePath)
-		if err != nil {
-			return err
-		}
-		return nil
-	},
+	Use:           "ferry",
+	Short:         "Deploy compose projects to your own servers",
+	Long:          `Ferry is a tiny layer on top of Docker, Docker contexts and SSH. Your compose file stays the source of truth; ferry.yaml maps services to servers and adds zero-downtime deploys via kamal-proxy, preview environments, and environment variables.`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
+// Execute runs the root command.
 func Execute() {
-	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "./ferry.yaml", "Path to ferry.yaml config file")
+	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "./ferry.yaml", "Path to ferry.yaml")
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// loadConfig loads ferry.yaml.
+func loadConfig() (*config.Config, error) {
+	return config.Load(configFilePath)
+}
+
+// loadPlan loads ferry.yaml and resolves it against the compose project.
+func loadPlan() (*plan.Plan, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return plan.Load(cfg)
+}
+
+// infof prints a progress line to stderr, keeping stdout stable for scripting.
+func infof(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }

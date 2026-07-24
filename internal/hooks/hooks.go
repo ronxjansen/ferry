@@ -1,190 +1,115 @@
+// Package hooks runs lifecycle hooks. pre_build runs locally; pre_deploy,
+// post_deploy and post_app_boot run on the target server. Entries are script
+// paths or inline shell commands; executable files at .ferry/hooks/<name>
+// are auto-discovered.
 package hooks
 
 import (
 	"fmt"
 	"os"
-	osExec "os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ronxjansen/ferry/internal/config"
 	"github.com/ronxjansen/ferry/internal/exec"
-	"go.uber.org/zap"
 )
 
-// Env contains variables passed to hooks
+// Env is the environment passed to every hook.
 type Env struct {
-	FerryVersion   string
-	FerryPerformer string
-	FerryApp       string
-	FerryServer    string
-	FerryImage     string
-	FerryRuntime   time.Duration // Elapsed time (post hooks only)
+	Version   string
+	Service   string
+	Server    string
+	Image     string
+	Performer string
+	Runtime   time.Duration
+	Preview   string // preview SHA, empty for regular deploys
 }
 
-// Runner executes lifecycle hooks
+func (e Env) vars() []string {
+	return []string{
+		"FERRY_VERSION=" + e.Version,
+		"FERRY_SERVICE=" + e.Service,
+		"FERRY_SERVER=" + e.Server,
+		"FERRY_IMAGE=" + e.Image,
+		"FERRY_PERFORMER=" + e.Performer,
+		"FERRY_RUNTIME=" + e.Runtime.Truncate(time.Second).String(),
+		"FERRY_PREVIEW=" + e.Preview,
+	}
+}
+
+// Runner executes hooks from config plus auto-discovered scripts.
 type Runner struct {
-	globalHooks map[config.HookType]config.Hook
-	logger      *zap.Logger
+	Hooks map[config.HookType]config.Hook
+	Dir   string // project dir; .ferry/hooks lives here
 }
 
-// NewRunner creates a new hook runner
-func NewRunner(globalHooks map[config.HookType]config.Hook, logger *zap.Logger) *Runner {
-	if globalHooks == nil {
-		globalHooks = make(map[config.HookType]config.Hook)
+// entries returns configured entries plus the auto-discovered script.
+func (r *Runner) entries(t config.HookType) []string {
+	entries := append([]string{}, r.Hooks[t]...)
+	discovered := filepath.Join(r.Dir, ".ferry", "hooks", string(t))
+	if info, err := os.Stat(discovered); err == nil && info.Mode()&0o111 != 0 {
+		entries = append(entries, discovered)
 	}
-	return &Runner{
-		globalHooks: globalHooks,
-		logger:      logger,
-	}
+	return entries
 }
 
-// RunLocal executes hook on local machine (pre_build)
-func (r *Runner) RunLocal(hookType config.HookType, appHooks map[config.HookType]config.Hook, env Env) error {
-	// Run global hooks first
-	if hook, ok := r.globalHooks[hookType]; ok {
-		if err := r.executeLocalHook(hookType, hook, env); err != nil {
-			return err
+// isScript reports whether an entry is a script file (relative to Dir).
+func (r *Runner) scriptPath(entry string) (string, bool) {
+	p := entry
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(r.Dir, entry)
+	}
+	if info, err := os.Stat(p); err == nil && !info.IsDir() {
+		return p, true
+	}
+	return "", false
+}
+
+// RunLocal executes a hook on this machine.
+func (r *Runner) RunLocal(t config.HookType, env Env) error {
+	for _, entry := range r.entries(t) {
+		var cmd *osexec.Cmd
+		if path, ok := r.scriptPath(entry); ok {
+			cmd = osexec.Command(path)
+		} else {
+			cmd = osexec.Command("sh", "-c", entry)
+		}
+		cmd.Dir = r.Dir
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(), env.vars()...)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("hook %s (%s) failed: %w", t, entry, err)
 		}
 	}
+	return nil
+}
 
-	// Run app-specific hooks
-	if appHooks != nil {
-		if hook, ok := appHooks[hookType]; ok {
-			if err := r.executeLocalHook(hookType, hook, env); err != nil {
-				return err
+// RunRemote executes a hook on the target server. Script files are read
+// locally and piped to a remote shell.
+func (r *Runner) RunRemote(h *exec.Host, t config.HookType, env Env) error {
+	exports := make([]string, 0, 8)
+	for _, v := range env.vars() {
+		key, val, _ := strings.Cut(v, "=")
+		exports = append(exports, fmt.Sprintf("export %s=%q;", key, val))
+	}
+	prefix := strings.Join(exports, " ")
+
+	for _, entry := range r.entries(t) {
+		script := entry
+		if path, ok := r.scriptPath(entry); ok {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("hook %s: %w", t, err)
 			}
+			script = string(content)
+		}
+		remote := fmt.Sprintf("%s sh <<'FERRY_HOOK_EOF'\n%s\nFERRY_HOOK_EOF", prefix, script)
+		if err := h.Stream(remote); err != nil {
+			return fmt.Errorf("hook %s (%s) failed: %w", t, entry, err)
 		}
 	}
-
 	return nil
-}
-
-// RunRemote executes hook on remote server via SSH
-func (r *Runner) RunRemote(executor exec.Executor, hookType config.HookType, appHooks map[config.HookType]config.Hook, env Env) error {
-	// Run global hooks first
-	if hook, ok := r.globalHooks[hookType]; ok {
-		if err := r.executeRemoteHook(executor, hookType, hook, env); err != nil {
-			return err
-		}
-	}
-
-	// Run app-specific hooks
-	if appHooks != nil {
-		if hook, ok := appHooks[hookType]; ok {
-			if err := r.executeRemoteHook(executor, hookType, hook, env); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (r *Runner) executeLocalHook(hookType config.HookType, hook config.Hook, env Env) error {
-	envVars := r.buildEnvVars(env)
-
-	// Check for script file first
-	if hook.Script != "" {
-		return r.runLocalScript(hookType, hook.Script, envVars)
-	}
-
-	// Check for .ferry/hooks/<hook-type> script
-	hookScript := filepath.Join(".ferry", "hooks", string(hookType))
-	if _, err := os.Stat(hookScript); err == nil {
-		return r.runLocalScript(hookType, hookScript, envVars)
-	}
-
-	// Run inline commands
-	for _, cmd := range hook.Commands {
-		r.logger.Info("Running local hook", zap.String("hook", string(hookType)), zap.String("cmd", cmd))
-
-		c := osExec.Command("sh", "-c", cmd)
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		c.Env = append(os.Environ(), envVars...)
-
-		if err := c.Run(); err != nil {
-			return fmt.Errorf("hook %s failed: %w", hookType, err)
-		}
-	}
-
-	return nil
-}
-
-func (r *Runner) runLocalScript(hookType config.HookType, scriptPath string, envVars []string) error {
-	r.logger.Info("Running local hook script", zap.String("hook", string(hookType)), zap.String("script", scriptPath))
-
-	c := osExec.Command(scriptPath)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	c.Env = append(os.Environ(), envVars...)
-
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("hook script %s failed: %w", scriptPath, err)
-	}
-	return nil
-}
-
-func (r *Runner) executeRemoteHook(executor exec.Executor, hookType config.HookType, hook config.Hook, env Env) error {
-	envExport := r.buildEnvExport(env)
-
-	// Check for script file first
-	if hook.Script != "" {
-		return r.runRemoteScript(executor, hookType, hook.Script, envExport)
-	}
-
-	// Run inline commands
-	for _, cmd := range hook.Commands {
-		r.logger.Info("Running remote hook", zap.String("hook", string(hookType)), zap.String("cmd", cmd))
-
-		fullCmd := fmt.Sprintf("%s%s", envExport, cmd)
-		if _, err := executor.Run(fullCmd); err != nil {
-			return fmt.Errorf("hook %s failed: %w", hookType, err)
-		}
-	}
-
-	return nil
-}
-
-func (r *Runner) runRemoteScript(executor exec.Executor, hookType config.HookType, scriptPath string, envExport string) error {
-	r.logger.Info("Running remote hook script", zap.String("hook", string(hookType)), zap.String("script", scriptPath))
-
-	// Read local script and execute it remotely
-	content, err := os.ReadFile(scriptPath)
-	if err != nil {
-		return fmt.Errorf("failed to read hook script %s: %w", scriptPath, err)
-	}
-
-	// Execute script content remotely
-	cmd := fmt.Sprintf("%scat <<'FERRY_HOOK_EOF' | sh\n%s\nFERRY_HOOK_EOF", envExport, string(content))
-	if _, err := executor.Run(cmd); err != nil {
-		return fmt.Errorf("hook script %s failed: %w", scriptPath, err)
-	}
-
-	return nil
-}
-
-func (r *Runner) buildEnvVars(env Env) []string {
-	vars := []string{
-		fmt.Sprintf("FERRY_VERSION=%s", env.FerryVersion),
-		fmt.Sprintf("FERRY_PERFORMER=%s", env.FerryPerformer),
-		fmt.Sprintf("FERRY_APP=%s", env.FerryApp),
-		fmt.Sprintf("FERRY_SERVER=%s", env.FerryServer),
-		fmt.Sprintf("FERRY_IMAGE=%s", env.FerryImage),
-	}
-	if env.FerryRuntime > 0 {
-		vars = append(vars, fmt.Sprintf("FERRY_RUNTIME=%s", env.FerryRuntime.String()))
-	}
-	return vars
-}
-
-func (r *Runner) buildEnvExport(env Env) string {
-	vars := r.buildEnvVars(env)
-	exports := make([]string, len(vars))
-	for i, v := range vars {
-		exports[i] = fmt.Sprintf("export %s", v)
-	}
-	return strings.Join(exports, "; ") + "; "
 }

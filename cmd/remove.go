@@ -2,57 +2,62 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
-	"github.com/ronxjansen/ferry/internal/exec"
+	"github.com/ronxjansen/ferry/internal/dockercmd"
+	"github.com/ronxjansen/ferry/internal/envfile"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
+var removeImages bool
+
 var removeCmd = &cobra.Command{
-	Use:   "remove <app>",
-	Short: "Remove an application",
-	Long:  `Stop and remove an application from its server`,
+	Use:   "remove <service>",
+	Short: "Deregister a service from the proxy and remove its containers",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		appName := args[0]
-
-		app, err := cfg.GetApp(appName)
-		if err != nil {
-			return fmt.Errorf("app '%s' not found. Available apps: %v", appName, cfg.AppNames())
-		}
-
-		server, err := app.GetServer(cfg)
+		p, err := loadPlan()
 		if err != nil {
 			return err
 		}
-
-		logger.Info("Removing app", zap.String("app", appName), zap.String("server", server.Name))
-
-		executor, err := exec.NewSSHExecutor(*server)
+		t, err := p.Target(args[0])
 		if err != nil {
-			return fmt.Errorf("failed to connect to %s: %w", server.Name, err)
+			return err
 		}
-		defer executor.Close()
+		d := newDeployer(p, "", time.Minute)
 
-		// Stop and remove containers
-		executor.Run(fmt.Sprintf("docker stop %s 2>/dev/null", app.Name))
-		executor.Run(fmt.Sprintf("docker rm %s 2>/dev/null", app.Name))
-		executor.Run(fmt.Sprintf("docker stop %s-new 2>/dev/null", app.Name))
-		executor.Run(fmt.Sprintf("docker rm %s-new 2>/dev/null", app.Name))
-
-		// Remove app directory
-		appDir := fmt.Sprintf("$HOME/%s", app.Name)
-		executor.Run(fmt.Sprintf("rm -rf %s", appDir))
-
-		// Cleanup
-		executor.Run("docker container prune -f")
-		executor.Run("docker image prune -f")
-
-		logger.Info("App removed", zap.String("app", appName))
+		for _, s := range t.Servers {
+			dk, err := d.Docker(s)
+			if err != nil {
+				return err
+			}
+			if t.Proxied() {
+				dk.Run(dockercmd.ProxyRemove(t.Name)...)
+			}
+			out, _ := dk.Run("ps", "--all",
+				"--filter", "label="+dockercmd.LabelProject+"="+p.Config.Name,
+				"--filter", "label="+dockercmd.LabelService+"="+t.Name,
+				"--format", "{{.Names}}\t{{.Image}}")
+			for _, line := range strings.Split(out, "\n") {
+				parts := strings.Split(line, "\t")
+				if len(parts) < 2 || parts[0] == "" {
+					continue
+				}
+				infof("%s@%s: removing %s", t.Name, s.Name, parts[0])
+				dk.Run("rm", "-f", parts[0])
+				if removeImages {
+					dk.Run("rmi", parts[1])
+				}
+			}
+			hostFor(s).Run(fmt.Sprintf("rm -rf %q", ".ferry/apps/"+t.Name))
+		}
+		infof("%s removed (env: %s deleted on hosts)", t.Name, envfile.RemotePath(t.Name))
 		return nil
 	},
 }
 
 func init() {
+	removeCmd.Flags().BoolVar(&removeImages, "images", false, "Also remove the service's images")
 	rootCmd.AddCommand(removeCmd)
 }
