@@ -148,6 +148,14 @@ func (t *Target) Port() int {
 	return 0
 }
 
+// ProxyService returns the kamal-proxy service name, prefixed with the
+// project name: kamal-proxy keys registrations by service name globally per
+// server, so two projects sharing a server with a same-named service would
+// otherwise clobber each other's routing and TLS host allowlist.
+func (t *Target) ProxyService() string {
+	return fmt.Sprintf("%s-%s", t.cfg.Name, t.Name)
+}
+
 // DomainsOn returns the domains for this service on a given server; without
 // configured domains it falls back to <service>.<ip-with-dashes>.sslip.io so
 // first contact needs zero DNS setup.

@@ -33,7 +33,7 @@ var removeCmd = &cobra.Command{
 				return err
 			}
 			if t.Proxied() {
-				dk.Run(dockercmd.ProxyRemove(t.Name)...)
+				dk.Run(dockercmd.ProxyRemove(t.ProxyService())...)
 			}
 			out, _ := dk.Run("ps", "--all",
 				"--filter", "label="+dockercmd.LabelProject+"="+p.Config.Name,

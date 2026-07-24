@@ -22,9 +22,10 @@ func previewContainerName(service, sha string) string {
 	return fmt.Sprintf("%s-%s-preview", service, sha)
 }
 
-// previewProxyService is the kamal-proxy service name for a preview target.
-func previewProxyService(service, sha string) string {
-	return fmt.Sprintf("%s-%s", service, sha)
+// previewProxyService is the kamal-proxy service name for a preview target,
+// project-prefixed for the same reason as Target.ProxyService.
+func (d *Deployer) previewProxyService(service, sha string) string {
+	return fmt.Sprintf("%s-%s-%s", d.cfg().Name, service, sha)
 }
 
 // previewHost returns the routing host: <sha>.<base> for the primary proxied
@@ -143,7 +144,7 @@ func (d *Deployer) DeployPreview() error {
 			previewURL := previewHost(t.Name, sha, base, !primaryAssigned)
 			primaryAssigned = true
 			args := dockercmd.ProxyDeploy(dockercmd.ProxyDeployOpts{
-				Service:       previewProxyService(t.Name, sha),
+				Service:       d.previewProxyService(t.Name, sha),
 				Target:        fmt.Sprintf("%s:%d", opts.Name, t.Port()),
 				Hosts:         []string{previewURL},
 				Health:        t.Overlay.Health,
@@ -266,7 +267,7 @@ func (d *Deployer) RemovePreview(sha string) error {
 			continue
 		}
 		name, service, image := parts[0], parts[1], parts[2]
-		dk.Run(dockercmd.ProxyRemove(previewProxyService(service, sha))...)
+		dk.Run(dockercmd.ProxyRemove(d.previewProxyService(service, sha))...)
 		d.logf("preview %s: removing %s", sha, name)
 		dk.Run("rm", "-f", name)
 		dk.Run("rmi", image) // no-op while prod still uses the same version

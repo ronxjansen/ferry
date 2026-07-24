@@ -115,6 +115,9 @@ func TestTargetResolution(t *testing.T) {
 	if got := web.ContainerName("abc123"); got != "web-abc123" {
 		t.Errorf("container name = %q", got)
 	}
+	if got := web.ProxyService(); got != "myapp-web" {
+		t.Errorf("proxy service = %q, want project-prefixed myapp-web (bare names collide across projects on a shared server)", got)
+	}
 	if web.BuildMethod() != "remote" {
 		t.Errorf("web build method = %q, want remote (compose has build:)", web.BuildMethod())
 	}

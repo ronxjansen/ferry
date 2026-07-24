@@ -42,7 +42,14 @@ leaves the running version untouched.`,
 		}
 
 		d := newDeployer(p, version, deployTimeout)
+		// A build context is always the working tree, never the named version's
+		// tree — so building under --version would tag dirty files with someone
+		// else's SHA. --version therefore only re-deploys an image that already
+		// exists, unless the user explicitly asks to build (--skip-build=false).
 		d.SkipBuild = deploySkipBuild
+		if deployVersion != "" && !cmd.Flags().Changed("skip-build") {
+			d.SkipBuild = true
+		}
 
 		started := time.Now()
 		err = lock.With(d.Host(d.PrimaryServer()), p.Config.Name, performer(), version, "deploy", func() error {
@@ -57,7 +64,7 @@ leaves the running version untouched.`,
 }
 
 func init() {
-	deployCmd.Flags().StringVar(&deployVersion, "version", "", "Deploy a specific version (git SHA) instead of HEAD")
+	deployCmd.Flags().StringVar(&deployVersion, "version", "", "Redeploy a specific version (git SHA) already on the host; implies --skip-build")
 	deployCmd.Flags().BoolVar(&deploySkipBuild, "skip-build", false, "Fail instead of building when the image is missing")
 	deployCmd.Flags().DurationVar(&deployTimeout, "timeout", 5*time.Minute, "Health-gate and job timeout")
 	rootCmd.AddCommand(deployCmd)

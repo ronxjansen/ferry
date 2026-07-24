@@ -212,7 +212,7 @@ func (d *Deployer) cutover(dk *exec.Docker, t *plan.Target, s *config.Server, im
 	}
 
 	proxyArgs := dockercmd.ProxyDeploy(dockercmd.ProxyDeployOpts{
-		Service:       t.Name,
+		Service:       t.ProxyService(),
 		Target:        fmt.Sprintf("%s:%d", opts.Name, t.Port()),
 		Hosts:         t.DomainsOn(s),
 		Health:        t.Overlay.Health,
@@ -290,7 +290,7 @@ func (d *Deployer) EnsureImage(t *plan.Target, s *config.Server) (string, error)
 	switch {
 	case t.BuildMethod() == "remote":
 		if d.SkipBuild {
-			return "", fmt.Errorf("image %s not on %s and --skip-build given", image, s.Name)
+			return "", fmt.Errorf("image %s not on %s and building is disabled (--skip-build=false builds it from the working tree)", image, s.Name)
 		}
 		if err := d.remoteBuild(t, s, image); err != nil {
 			return "", err

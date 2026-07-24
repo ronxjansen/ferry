@@ -48,7 +48,7 @@ func proxyToggle(service string, build func(string) []string, action string) err
 		if err != nil {
 			return err
 		}
-		if _, err := dk.Run(build(t.Name)...); err != nil {
+		if _, err := dk.Run(build(t.ProxyService())...); err != nil {
 			return err
 		}
 		infof("%s@%s: %s", t.Name, s.Name, action)

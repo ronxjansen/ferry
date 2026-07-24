@@ -48,7 +48,7 @@ func (d *Deployer) Rollback(targets []*plan.Target, version string) error {
 				return err
 			}
 			args := dockercmd.ProxyDeploy(dockercmd.ProxyDeployOpts{
-				Service:       st.t.Name,
+				Service:       st.t.ProxyService(),
 				Target:        fmt.Sprintf("%s:%d", st.container, st.t.Port()),
 				Hosts:         st.t.DomainsOn(st.dk.Server),
 				Health:        st.t.Overlay.Health,
