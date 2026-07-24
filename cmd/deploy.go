@@ -45,7 +45,7 @@ leaves the running version untouched.`,
 		d.SkipBuild = deploySkipBuild
 
 		started := time.Now()
-		err = lock.With(d.Host(d.PrimaryServer()), performer(), version, "deploy", func() error {
+		err = lock.With(d.Host(d.PrimaryServer()), p.Config.Name, performer(), version, "deploy", func() error {
 			return d.Deploy(targets)
 		})
 		if err != nil {

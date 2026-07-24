@@ -29,11 +29,11 @@ var lockCmd = &cobra.Command{
 		}
 		switch action {
 		case "acquire":
-			return lock.Acquire(host, performer(), "-", lockMessage)
+			return lock.Acquire(host, p.Config.Name, performer(), "-", lockMessage)
 		case "release":
-			return lock.Release(host)
+			return lock.Release(host, p.Config.Name)
 		default:
-			details, err := lock.Status(host)
+			details, err := lock.Status(host, p.Config.Name)
 			if err != nil {
 				fmt.Println("Unlocked")
 				return nil

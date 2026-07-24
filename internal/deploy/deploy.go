@@ -403,12 +403,19 @@ func (d *Deployer) prepareEnv(t *plan.Target, s *config.Server, extraFile string
 	return tmp, shipped, func() { os.Remove(tmp) }, nil
 }
 
+// ensureNetwork creates the proxy network if it is missing. The deploy lock is
+// per-project, so apps sharing a server can reach here at the same time: a
+// create that loses the race is not an error as long as the network now exists.
 func (d *Deployer) ensureNetwork(dk *exec.Docker) error {
 	if _, err := dk.Run("network", "inspect", d.cfg().Proxy.Network); err == nil {
 		return nil
 	}
-	_, err := dk.Run("network", "create", "--attachable", d.cfg().Proxy.Network)
-	return err
+	if _, err := dk.Run("network", "create", "--attachable", d.cfg().Proxy.Network); err != nil {
+		if _, e := dk.Run("network", "inspect", d.cfg().Proxy.Network); e != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runningContainers returns name→version of running containers for a service

@@ -38,7 +38,7 @@ clean git tree; re-running on the same commit replaces the preview.`,
 		}
 
 		d := newDeployer(p, sha, previewTimeout)
-		return lock.With(d.Host(d.PrimaryServer()), performer(), sha, "preview", func() error {
+		return lock.With(d.Host(d.PrimaryServer()), p.Config.Name, performer(), sha, "preview", func() error {
 			return d.DeployPreview()
 		})
 	},

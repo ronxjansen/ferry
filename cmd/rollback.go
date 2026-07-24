@@ -30,7 +30,7 @@ transfer. Without --version the most recently retained container is used.`,
 		}
 
 		d := newDeployer(p, rollbackVersion, rollbackTimeout)
-		return lock.With(d.Host(d.PrimaryServer()), performer(), rollbackVersion, "rollback", func() error {
+		return lock.With(d.Host(d.PrimaryServer()), p.Config.Name, performer(), rollbackVersion, "rollback", func() error {
 			return d.Rollback(targets, rollbackVersion)
 		})
 	},
