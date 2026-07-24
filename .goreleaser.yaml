@@ -1,0 +1,38 @@
+version: 2
+
+project_name: ferry
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: ferry
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/ronxjansen/ferry/cmd.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+# release-please owns the changelog and release notes; GoReleaser only
+# attaches artifacts to the release it already created.
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing

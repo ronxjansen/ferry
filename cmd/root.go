@@ -9,8 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is the ferry CLI version.
-const Version = "0.2.0"
+// Version is the ferry CLI version. Bumped by release-please and
+// overridden at build time by GoReleaser via -ldflags.
+var Version = "0.2.0" // x-release-please-version
 
 var configFilePath string
 
