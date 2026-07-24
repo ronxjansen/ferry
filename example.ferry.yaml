@@ -35,15 +35,20 @@ proxy:
 
 # ── Image delivery ───────────────────────────────────────────────────
 build:
-  method: remote                 # remote = build ON the VPS via its Docker
-                                 #          context (default when the compose
-                                 #          service has build:). Registry-free;
-                                 #          build cache lives on the host.
+  method: remote                 # remote = ship the build context and build ON
+                                 #          the VPS as a detached job (default
+                                 #          when the compose service has
+                                 #          build:). Registry-free; build cache
+                                 #          lives on the host; the build
+                                 #          survives dropped connections and
+                                 #          ferry re-attaches to it.
                                  # pull   = pull from a registry (default when
                                  #          the service only has image:).
   retain: 5                      # stopped old-version containers kept per
                                  # service — the rollback depth
-registry:                        # only for method: pull with private images
+registry:                        # for method: pull with private images (also
+                                 # logs the host in before remote builds, so
+                                 # private base images work)
   server: ghcr.io                # omit for Docker Hub
   username: me
   password: FERRY_REGISTRY_PASSWORD # name of a variable in the env file (or

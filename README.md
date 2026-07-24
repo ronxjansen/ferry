@@ -60,6 +60,13 @@ The two pillars:
    VPS CPU/RAM — `build.method: pull` is the escape hatch for small hosts or
    CI-built images.
 
+Ferry assumes the link to your servers is flaky and survives it: remote
+builds run as detached jobs on the host (a dropped connection — or a killed
+terminal — never kills a build; ferry re-attaches and streams the log from
+where it left off), every SSH connection carries generous keepalives, short
+control commands retry transparently on transient transport errors, and
+interrupted pulls resume from the layer cache.
+
 ## Installation
 
 ```sh
@@ -149,6 +156,10 @@ servers, since startup ordering is then only best-effort.
 inspirations. Kamal is great but Ruby-based and re-invents a service schema
 your compose file already expresses; Sidekick is early stage. Ferry bets on
 the compose file you already have.
+
+## Roadmap
+
+- [ ] We need to keep db services running; now they stop and get restarted like a normal app
 
 ## Contributing
 

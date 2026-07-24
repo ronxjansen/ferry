@@ -5,6 +5,7 @@ package deploy
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"sort"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"github.com/ronxjansen/ferry/internal/audit"
+	"github.com/ronxjansen/ferry/internal/buildctx"
 	"github.com/ronxjansen/ferry/internal/config"
 	"github.com/ronxjansen/ferry/internal/dockercmd"
 	"github.com/ronxjansen/ferry/internal/envfile"
 	"github.com/ronxjansen/ferry/internal/exec"
 	"github.com/ronxjansen/ferry/internal/hooks"
 	"github.com/ronxjansen/ferry/internal/plan"
+	"github.com/ronxjansen/ferry/internal/remotejob"
 )
 
 // Deployer carries one invocation's context: version, performer, flags.
@@ -202,7 +205,7 @@ func (d *Deployer) cutover(dk *exec.Docker, t *plan.Target, s *config.Server, im
 			dk.Run("rm", "-f", opts.Name)
 		}
 		d.logf("%s@%s: starting %s", t.Name, s.Name, opts.Name)
-		if _, err := dk.Run(dockercmd.Run(t.Compose, image, opts)...); err != nil {
+		if err := d.startContainer(dk, t, image, opts); err != nil {
 			return err
 		}
 		created = true
@@ -248,7 +251,7 @@ func (d *Deployer) restartInPlace(dk *exec.Docker, t *plan.Target, image string,
 		dk.Run("rm", "-f", opts.Name)
 	}
 	d.logf("%s: starting %s", t.Name, opts.Name)
-	if _, err := dk.Run(dockercmd.Run(t.Compose, image, opts)...); err != nil {
+	if err := d.startContainer(dk, t, image, opts); err != nil {
 		return err
 	}
 	if err := d.waitHealthy(dk, opts.Name); err != nil {
@@ -289,8 +292,7 @@ func (d *Deployer) EnsureImage(t *plan.Target, s *config.Server) (string, error)
 		if d.SkipBuild {
 			return "", fmt.Errorf("image %s not on %s and --skip-build given", image, s.Name)
 		}
-		d.logf("%s@%s: building %s on the host", t.Name, s.Name, image)
-		if err := dk.Stream(dockercmd.Build(t.Compose.Build, image)...); err != nil {
+		if err := d.remoteBuild(t, s, image); err != nil {
 			return "", err
 		}
 	default:
@@ -298,18 +300,65 @@ func (d *Deployer) EnsureImage(t *plan.Target, s *config.Server) (string, error)
 			return "", err
 		}
 		d.logf("%s@%s: pulling %s", t.Name, s.Name, image)
-		if err := dk.Stream("pull", image); err != nil {
+		// A transient drop mid-pull retries cheaply: completed layers stay
+		// in the daemon's cache.
+		if _, err := exec.RunRetry(func() (string, error) {
+			return "", dk.Stream("pull", image)
+		}); err != nil {
 			return "", err
 		}
 	}
 	return image, nil
 }
 
-func (d *Deployer) registryLogin(dk *exec.Docker) error {
-	reg := d.cfg().Registry
-	if reg == nil {
-		return nil
+// remoteBuild builds the image on the host without depending on an unbroken
+// connection: the context ships as one tarball, the build itself runs as a
+// detached job on the server, and ferry follows its log over a reconnecting
+// stream. A dropped link (or a killed ferry) leaves the build running; the
+// follow loop — or a rerun — re-attaches instead of starting over.
+func (d *Deployer) remoteBuild(t *plan.Target, s *config.Server, image string) error {
+	host := d.Host(s)
+	job := remotejob.New(host, fmt.Sprintf("build-%s-%s", t.Name, d.Version))
+
+	if job.Running() {
+		d.logf("%s@%s: build of %s already in flight, re-attaching", t.Name, s.Name, image)
+	} else {
+		if err := d.registryLoginHost(host); err != nil {
+			return err
+		}
+		ctxDir := t.BuildContextDir()
+		remoteCtx := job.Dir() + "/ctx"
+		d.logf("%s@%s: shipping build context from %s", t.Name, s.Name, ctxDir)
+		ship := func() (string, error) {
+			pr, pw := io.Pipe()
+			go func() {
+				pw.CloseWithError(buildctx.WriteTar(pw, ctxDir, t.Compose.Build.Dockerfile))
+			}()
+			defer pr.Close()
+			return host.RunReader(pr, fmt.Sprintf(`rm -rf %[1]q && mkdir -p %[1]q && tar -xzf - -C %[1]q`, remoteCtx))
+		}
+		if _, err := exec.RunRetry(ship); err != nil {
+			return fmt.Errorf("failed to ship build context: %w", err)
+		}
+		d.logf("%s@%s: building %s on the host (detached, survives disconnects)", t.Name, s.Name, image)
+		if err := job.Start(dockercmd.BuildScript(t.Compose.Build, image, remoteCtx)); err != nil {
+			return err
+		}
 	}
+
+	code, err := job.Follow(os.Stdout)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("build of %s failed with exit code %d (full log: %s on %s)", image, code, job.LogPath(), s.Name)
+	}
+	job.Clean()
+	return nil
+}
+
+func (d *Deployer) registryPassword() (string, error) {
+	reg := d.cfg().Registry
 	password := os.Getenv(reg.Password)
 	if password == "" {
 		env, err := envfile.Load(d.cfg().EnvFilesFor(nil), d.cfg().Env.Encryption == "sops-age")
@@ -318,7 +367,19 @@ func (d *Deployer) registryLogin(dk *exec.Docker) error {
 		}
 	}
 	if password == "" {
-		return fmt.Errorf("registry password variable %s not set (env or %s)", reg.Password, d.cfg().Env.File)
+		return "", fmt.Errorf("registry password variable %s not set (env or %s)", reg.Password, d.cfg().Env.File)
+	}
+	return password, nil
+}
+
+func (d *Deployer) registryLogin(dk *exec.Docker) error {
+	reg := d.cfg().Registry
+	if reg == nil {
+		return nil
+	}
+	password, err := d.registryPassword()
+	if err != nil {
+		return err
 	}
 	args := dk.Args("login", "--username", reg.Username, "--password-stdin")
 	if reg.Server != "" {
@@ -326,6 +387,28 @@ func (d *Deployer) registryLogin(dk *exec.Docker) error {
 	}
 	if _, err := exec.RunInput([]byte(password), args...); err != nil {
 		return fmt.Errorf("registry login failed: %w", err)
+	}
+	return nil
+}
+
+// registryLoginHost logs the host's own docker into the registry: a detached
+// build runs server-side, so private base images can't ride on the local
+// client's credentials the way tunneled builds did.
+func (d *Deployer) registryLoginHost(h *exec.Host) error {
+	reg := d.cfg().Registry
+	if reg == nil {
+		return nil
+	}
+	password, err := d.registryPassword()
+	if err != nil {
+		return err
+	}
+	command := fmt.Sprintf("docker login --username %s --password-stdin", dockercmd.ShellQuote(reg.Username))
+	if reg.Server != "" {
+		command += " " + dockercmd.ShellQuote(reg.Server)
+	}
+	if _, err := h.RunInput([]byte(password), command); err != nil {
+		return fmt.Errorf("registry login on %s failed: %w", h.Server.Name, err)
 	}
 	return nil
 }
@@ -406,16 +489,40 @@ func (d *Deployer) prepareEnv(t *plan.Target, s *config.Server, extraFile string
 // ensureNetwork creates the proxy network if it is missing. The deploy lock is
 // per-project, so apps sharing a server can reach here at the same time: a
 // create that loses the race is not an error as long as the network now exists.
+// The same recheck covers a retried create colliding with its own first
+// attempt whose reply was lost to the link.
 func (d *Deployer) ensureNetwork(dk *exec.Docker) error {
-	if _, err := dk.Run("network", "inspect", d.cfg().Proxy.Network); err == nil {
+	return ensureNetworkNamed(dk, d.cfg().Proxy.Network)
+}
+
+func ensureNetworkNamed(dk *exec.Docker, name string) error {
+	if _, err := dk.Run("network", "inspect", name); err == nil {
 		return nil
 	}
-	if _, err := dk.Run("network", "create", "--attachable", d.cfg().Proxy.Network); err != nil {
-		if _, e := dk.Run("network", "inspect", d.cfg().Proxy.Network); e != nil {
+	if _, err := dk.Run("network", "create", "--attachable", name); err != nil {
+		if _, e := dk.Run("network", "inspect", name); e != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// startContainer runs a new container, tolerating the retried-run edge: if a
+// transient failure lost the reply to a `docker run` that actually created
+// the container, the retry's name conflict resolves by starting what exists.
+func (d *Deployer) startContainer(dk *exec.Docker, t *plan.Target, image string, opts dockercmd.RunOpts) error {
+	_, err := dk.Run(dockercmd.Run(t.Compose, image, opts)...)
+	if err == nil {
+		return nil
+	}
+	switch d.containerState(dk, opts.Name) {
+	case "running":
+		return nil
+	case "created", "exited":
+		_, startErr := dk.Run("start", opts.Name)
+		return startErr
+	}
+	return err
 }
 
 // runningContainers returns name→version of running containers for a service

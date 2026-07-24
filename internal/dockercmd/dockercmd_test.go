@@ -106,6 +106,26 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+func TestBuildScript(t *testing.T) {
+	val := "two words $HOME"
+	build := &types.BuildConfig{
+		Context:    "./api",
+		Dockerfile: "Dockerfile.prod",
+		Args:       types.MappingWithEquals{"VERSION": &val},
+	}
+	got := BuildScript(build, "myapp/api:abc", ".ferry/jobs/build-api-abc/ctx")
+	want := `cd '.ferry/jobs/build-api-abc/ctx' && exec docker 'build' '--tag' 'myapp/api:abc' '--file' 'Dockerfile.prod' '--build-arg' 'VERSION=two words $HOME' '.'`
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	if got := ShellQuote(`it's a "test" $x`); got != `'it'\''s a "test" $x'` {
+		t.Errorf("ShellQuote = %q", got)
+	}
+}
+
 func TestProxyDeploy(t *testing.T) {
 	args := ProxyDeploy(ProxyDeployOpts{
 		Service:       "web",

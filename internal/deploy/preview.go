@@ -69,10 +69,8 @@ func (d *Deployer) DeployPreview() error {
 		return err
 	}
 	network := d.previewProject(sha)
-	if _, err := dk.Run("network", "inspect", network); err != nil {
-		if _, err := dk.Run("network", "create", "--attachable", network); err != nil {
-			return err
-		}
+	if err := ensureNetworkNamed(dk, network); err != nil {
+		return err
 	}
 
 	isolate := map[string]bool{}
@@ -134,7 +132,7 @@ func (d *Deployer) DeployPreview() error {
 		}
 
 		d.logf("preview %s: starting %s", sha, opts.Name)
-		if _, err := dk.Run(dockercmd.Run(t.Compose, image, opts)...); err != nil {
+		if err := d.startContainer(dk, t, image, opts); err != nil {
 			return err
 		}
 

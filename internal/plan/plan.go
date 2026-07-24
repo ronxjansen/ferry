@@ -181,6 +181,19 @@ func (t *Target) Versioned() bool {
 	return t.Compose.Build != nil
 }
 
+// BuildContextDir returns the absolute build context directory for a
+// versioned service (shipping it to a build host needs the real path).
+func (t *Target) BuildContextDir() string {
+	ctx := t.Compose.Build.Context
+	if ctx == "" {
+		ctx = "."
+	}
+	if filepath.IsAbs(ctx) {
+		return ctx
+	}
+	return filepath.Join(t.cfg.Dir, ctx)
+}
+
 // ImageRef returns the image reference to build/pull/run for a version.
 func (t *Target) ImageRef(version string) string {
 	if !t.Versioned() {

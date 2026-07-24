@@ -206,6 +206,25 @@ func Build(build *types.BuildConfig, image string) []string {
 	return append(args, ctx)
 }
 
+// BuildScript renders the shell command for a host-side build: cd into the
+// shipped context dir and build with "." as context, so compose-relative
+// dockerfile paths resolve the same way they would locally.
+func BuildScript(build *types.BuildConfig, image, ctxDir string) string {
+	args := Build(build, image)
+	args[len(args)-1] = "."
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = ShellQuote(a)
+	}
+	return fmt.Sprintf("cd %s && exec docker %s", ShellQuote(ctxDir), strings.Join(quoted, " "))
+}
+
+// ShellQuote makes a string safe for POSIX shell embedding (build-arg values
+// can contain anything).
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // ProxyRun builds argv to boot the kamal-proxy container on a server.
 func ProxyRun(p config.Proxy) []string {
 	return []string{
