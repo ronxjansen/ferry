@@ -1,43 +1,149 @@
-image: ronxjansen/ferry:latest
-container_name: ferry
-network: ferry-network
-env_file: ./.env.production # Defaults to .env
-docker_file: ./Dockerfile # Defaults to Dockerfile ./Dockerfile
-docker_context: ./ # Defaults to current directory .
-port: 8080 # Container port, defaults to 3000
-type: app
+# example.ferry.yaml — the full annotated schema.
+# A working ferry.yaml is ~10 lines (see the minimal example in the README);
+# everything here beyond servers: and services: has sensible defaults.
+#
+# Compose is the source of truth: ferry never re-invents image, build,
+# volumes, depends_on, healthcheck, command or networks — it reads them from
+# your compose file. ferry.yaml only adds what compose cannot express: which
+# server, which domain, how the image gets there, previews, hooks, commands.
 
-# registry:
-#   username: ronxjansen
-#   password: ${ DOCKER_REGISTRY_TOKEN } 
-#   server: ghcr.io 
+# ── Project ──────────────────────────────────────────────────────────
+name: myapp                      # default: directory name; prefixes contexts,
+                                 # networks, preview projects, on-host state dirs
 
-# add a custom command to the CLI
-commands:
-  - name: migrate
-    command: /app/bin/phx_build eval "PhxBuild.Release.migrate"
+compose:                         # compose file(s), standard compose merge order
+  - docker-compose.yml           # default: compose.yaml / docker-compose.yml
+  - docker-compose.production.yml # optional prod overlay — this is how you keep
+                                 # a local setup AND a separate remote setup
 
-services:
-  - name: app
-    hosts: 
-      - vps
-    type: app
-    image: ronxjansen/ferry:latest
-    container_name: ferry
-    network: ferry-network
-    env_file: ./.env.production # Defaults to .env
-    docker_file: ./Dockerfile # Defaults to Dockerfile ./Dockerfile
-    docker_context: ./ # Defaults to current directory .
-    port: 8080 # Container port, defaults to 3000
-    health_check:
-      path: /health
-      success_status_code: 200
-      timeout: 5s
-      interval: 10s
-
+# ── Servers (each becomes a Docker context: ferry-<name>-<server>) ───
 servers:
-  - name: vps
-    host: 127.0.0.1 
-    user: ubuntu # SSH user, defaults to root
-    app_dir: /home/ronxjansen/ferry # Defaults to $HOME/<container_name>
-    port: 22 # SSH port, defaults to 22
+  vps-1: 165.232.100.10          # short form: name → host
+  vps-2:                         # long form
+    host: 165.232.100.11
+    user: deploy                 # default: root
+    port: 22                     # default: 22
+    # SSH auth comes from your system SSH (~/.ssh/config, agent, known_hosts)
+    # because contexts use ssh:// — no key_file plumbing.
+
+# ── Proxy (kamal-proxy; one container per proxied server) ────────────
+proxy:
+  image: basecamp/kamal-proxy:v0.9.0 # default; pinned
+  network: ferry                 # attachable network shared with app containers
+  http_port: 80                  # default
+  https_port: 443                # default
+
+# ── Image delivery ───────────────────────────────────────────────────
+build:
+  method: remote                 # remote = ship the build context and build ON
+                                 #          the VPS as a detached job (default
+                                 #          when the compose service has
+                                 #          build:). Registry-free; build cache
+                                 #          lives on the host; the build
+                                 #          survives dropped connections and
+                                 #          ferry re-attaches to it.
+                                 # pull   = pull from a registry (default when
+                                 #          the service only has image:).
+  retain: 5                      # stopped old-version containers kept per
+                                 # service — the rollback depth
+registry:                        # for method: pull with private images (also
+                                 # logs the host in before remote builds, so
+                                 # private base images work)
+  server: ghcr.io                # omit for Docker Hub
+  username: me
+  password: FERRY_REGISTRY_PASSWORD # name of a variable in the env file (or
+                                 # your shell env) — never a literal secret
+
+# ── Environment / secrets ────────────────────────────────────────────
+env:
+  file: .env.production          # base env file for all services
+  encryption: none               # none (default) | sops-age
+                                 # sops-age: files are decrypted with sops on
+                                 # your machine; plaintext never hits the repo
+# Delivery: shipped to ~/.ferry/apps/<service>/env on the host, chmod 0600,
+# values delivered through the Docker API — never in argv. Re-shipped only
+# when the content hash changes.
+
+# ── Services (overlay on compose services; key must exist in compose) ─
+services:
+  web:
+    servers: [vps-1, vps-2]      # REQUIRED — the service → server mapping.
+                                 # Multi-server = same container on each host,
+                                 # deployed in sequence (rolling).
+    domain: example.com          # presence of domain ⇒ registered with
+                                 # kamal-proxy: --host example.com --tls
+    # domains: [a.com, b.com]    # multi-domain routing
+    port: 3000                   # container port the proxy targets.
+                                 # default: compose expose / first ports entry.
+                                 # port without domain ⇒ proxied at
+                                 # web.165-232-100-10.sslip.io (zero DNS setup)
+    health:                      # → kamal-proxy --health-check-* flags
+      path: /up                  # default: "/" (proxy default)
+      interval: 5s
+      timeout: 5s
+    proxy:                       # optional passthrough of advanced kamal-proxy
+      response_timeout: 30s      # deploy flags: buffering, forward_headers,
+      forward_headers: "true"    # path_prefix, max body sizes, log headers...
+    env_file: .env.web           # merged over the global env file
+    build: remote                # per-service override of build.method
+
+  worker:
+    servers: [vps-1]             # no domain/port ⇒ not proxied, just runs.
+    # command, depends_on, volumes, networks, image — all come from compose.
+
+  db:
+    servers: [vps-1]
+    stateful: true               # converge, don't bounce: stable container name
+                                 # (myapp-db), left running across deploys and
+                                 # only recreated when its own config changed —
+                                 # image, env, ports, volumes, command. Excluded
+                                 # from rollback/prune (data lives in volumes).
+                                 # Force a bounce with ferry deploy --recreate.
+                                 # Cannot be combined with domain/port or job,
+                                 # and the compose service must be image-only
+                                 # (postgres:16, redis:7, ...), not build:.
+
+  migrate:
+    servers: [vps-1]
+    job: true                    # one-shot: runs to completion, non-zero exit
+                                 # aborts the deploy before any cutover.
+                                 # Ordered via compose depends_on.
+
+# ── Preview deployments ──────────────────────────────────────────────
+preview:
+  domain: preview.example.com    # previews live at <sha>.preview.example.com
+                                 # default: <sha>.<primary service domain>
+  server: vps-1                  # default: first server of the first proxied service
+  services: [web, db, migrate]   # default: all services
+  isolate: [db]                  # REQUIRED for stateful services: cloned per
+                                 # preview under project <name>-<sha> with fresh
+                                 # namespaced volumes — the DB isolation.
+  env_file: .env.preview         # overlay so previews never see prod credentials
+  ttl: 168h                      # auto-remove previews older than this on the
+                                 # next ferry preview invocation (default: never)
+
+# ── Hooks (script file or inline command; auto-discovery: executable
+#    files at .ferry/hooks/<hook-name> run without any config) ────────
+hooks:
+  pre_build:                     # local, before building
+    - ./scripts/check-ci.sh
+  pre_deploy: []                 # remote, after image exists on host, before cutover
+  post_deploy: []                # remote, after cutover
+  post_app_boot: []              # remote, after the proxy reports the target live
+# Env passed: FERRY_VERSION, FERRY_SERVICE, FERRY_SERVER, FERRY_IMAGE,
+# FERRY_PERFORMER, FERRY_RUNTIME, FERRY_PREVIEW (sha or empty).
+
+# ── Custom commands (ferry run <name>) ───────────────────────────────
+commands:
+  console:
+    description: Rails console in the web container
+    service: web                 # runs inside this service's container...
+    command: bin/rails console
+    interactive: true
+  psql:
+    service: db
+    command: psql -U postgres
+    interactive: true
+  disk:
+    server: vps-1                # ...or on a host
+    command: df -h

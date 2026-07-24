@@ -4,115 +4,49 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ronxjansen/ferry/internal/config"
+	"github.com/ronxjansen/ferry/internal/plan"
 	"github.com/spf13/cobra"
-	prettyconsole "github.com/thessem/zap-prettyconsole"
-	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
-
-	ferry "github.com/ronxjansen/ferry/internal"
 )
 
-var configFilePath string
-var dockerFilePath string
-var dockerContext string
-var envFilePath string
+// Version is the ferry CLI version. Bumped by release-please and
+// overridden at build time by GoReleaser via -ldflags.
+var Version = "0.2.0" // x-release-please-version
 
-var domain string
-var certResolver string
-var appName string
-var imageName string
-var deployMethod string
-var logger = prettyconsole.NewLogger(zap.DebugLevel)
+var configFilePath string
 
 var rootCmd = &cobra.Command{
-	Use:   "ferry",
-	Short: "CLI to self-host all your apps on a sinlge VPS without vendor locking",
-	Long:  `With Ferry you can deploy any number of applications to a single VPS, connect multiple domains and much more.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		// Render the cobra default help menu
-		cmd.Help()
-	},
+	Use:           "ferry",
+	Short:         "Deploy compose projects to your own servers",
+	Long:          `Ferry is a tiny layer on top of Docker, Docker contexts and SSH. Your compose file stays the source of truth; ferry.yaml maps services to servers and adds zero-downtime deploys via kamal-proxy, preview environments, and environment variables.`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
-func buildConfig() ferry.Config {
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		logger.Fatal("Failed to read config file", zap.Error(err))
-	}
-
-	var config ferry.Config
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		logger.Fatal("Failed to parse config", zap.Error(err))
-	}
-
-	// Merge file config with command-line arguments
-	if config.DeployMethod == "" {
-		config.DeployMethod = "pull"
-	}
-	if dockerFilePath != "" {
-		config.DockerFile = dockerFilePath
-	}
-	if dockerContext != "" {
-		config.DockerContext = dockerContext
-	}
-	if envFilePath != "" {
-		config.EnvFile = envFilePath
-	}
-	if appName != "" {
-		config.ContainerName = appName
-	}
-	if imageName != "" {
-		config.Image = imageName
-	}
-	if domain != "" {
-		config.Domain = domain
-	}
-	if certResolver != "" {
-		config.CertResolver = certResolver
-	}
-
-	// Integer defaults are not correctly set by yaml unmarshal
-	if config.Port == 0 {
-		config.Port = 8080
-	}
-	if config.Health.SuccessStatusCode == 0 {
-		config.Health.SuccessStatusCode = 200
-	}
-
-	if config.Health.Path == "" {
-		config.Health.Path = "/health"
-	}
-	if config.Health.Interval == "" {
-		config.Health.Interval = "30s"
-	}
-	if config.Health.Timeout == "" {
-		config.Health.Timeout = "5s"
-	}
-	for i, server := range config.Servers {
-		if server.Port == 0 {
-			config.Servers[i].Port = 22
-		}
-		if server.AppDir == "" {
-			config.Servers[i].AppDir = fmt.Sprintf("$HOME/%s", config.ContainerName)
-		}
-	}
-
-	return config
-}
-
+// Execute runs the root command.
 func Execute() {
-	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "./ferry.yaml", "Path to your ferry.yaml config file")
-	rootCmd.PersistentFlags().StringVarP(&dockerFilePath, "docker-file", "f", "", "Path to your Dockerfile")
-	rootCmd.PersistentFlags().StringVarP(&dockerContext, "docker-context", "x", "", "Path to the context of your Dockerfile")
-	rootCmd.PersistentFlags().StringVarP(&envFilePath, "env-file", "e", "", "Path to your environment variables file")
-	rootCmd.PersistentFlags().StringVarP(&imageName, "image", "i", "", "Docker image to use for your application")
-	rootCmd.PersistentFlags().StringVarP(&domain, "domain", "d", "", "Domain to use for your application")
-	rootCmd.PersistentFlags().StringVarP(&certResolver, "cert-resolver", "r", "", "Cert resolver to use for your application")
-	rootCmd.PersistentFlags().StringVarP(&appName, "app-name", "a", "", "Name of your application container")
-	rootCmd.PersistentFlags().StringVarP(&deployMethod, "method", "m", "", "Deploy method to use for your application: pull or build")
-	err := rootCmd.Execute()
-	if err != nil {
+	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "./ferry.yaml", "Path to ferry.yaml")
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// loadConfig loads ferry.yaml.
+func loadConfig() (*config.Config, error) {
+	return config.Load(configFilePath)
+}
+
+// loadPlan loads ferry.yaml and resolves it against the compose project.
+func loadPlan() (*plan.Plan, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return plan.Load(cfg)
+}
+
+// infof prints a progress line to stderr, keeping stdout stable for scripting.
+func infof(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
